@@ -1,0 +1,35 @@
+import React from 'react';
+import { View, StyleSheet } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
+
+const OrderAvatar = () => (
+  <View style={styles.container}>
+    <Svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+      <Path 
+        d="M6 2L3 6v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6l-3-4H6z" 
+        fill="#7C4DFF" 
+      />
+      <Path 
+        d="M16 10a1 1 0 00-1-1H9a1 1 0 00-1 1v1h8v-1z" 
+        fill="#fff" 
+      />
+      <Path 
+        d="M19 6H5l1-4h12l1 4z" 
+        fill="#5E35B1" 
+      />
+    </Svg>
+  </View>
+);
+
+const styles = StyleSheet.create({
+  container: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F3E5F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
+
+export default OrderAvatar;
