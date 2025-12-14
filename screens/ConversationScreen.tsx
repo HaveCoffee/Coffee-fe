@@ -1,9 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { RouteProp, useRoute } from '@react-navigation/native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
     FlatList,
-    Image,
     KeyboardAvoidingView,
     Platform,
     SafeAreaView,
@@ -13,7 +12,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { RootStackParamList } from '../navigation/types';
+import Avatar from '../components/Avatar';
 
 type Message = {
   id: string;
@@ -22,11 +21,9 @@ type Message = {
   time: string;
 };
 
-type ConversationScreenRouteProp = RouteProp<RootStackParamList, 'Conversation'>;
-
 export default function ConversationScreen() {
-  const route = useRoute<ConversationScreenRouteProp>();
-  const { conversationId } = route.params;
+  const router = useRouter();
+  const { id } = useLocalSearchParams<{ id?: string }>();
   const [message, setMessage] = useState('');
   
   // Mock messages - in a real app, this would come from your state management
@@ -87,28 +84,48 @@ export default function ConversationScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="black" />
         </TouchableOpacity>
-        <View style={styles.userInfo}>
-          <View style={styles.avatarContainer}>
-            <Image
-              source={require('../assets/placeholder-avatar.png')}
-              style={styles.avatar}
-            />
-            <View style={styles.onlineIndicator} />
-          </View>
-          <View>
-            <Text style={styles.userName}>Anya</Text>
-            <Text style={styles.userStatus}>Online</Text>
-          </View>
-        </View>
+        <Text style={styles.headerTitle}>Conversation</Text>
         <View style={styles.headerIcons}>
           <TouchableOpacity style={styles.notificationIcon}>
             <Ionicons name="notifications-outline" size={24} color="black" />
+            <View style={styles.notificationBadge}>
+              <Text style={styles.notificationCount}>3</Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.profileImageContainer}>
+            <Avatar size={32} />
+            <View style={styles.onlineIndicator} />
           </TouchableOpacity>
           <TouchableOpacity>
-            <Ionicons name="ellipsis-vertical" size={24} color="black" />
+            <Ionicons name="ellipsis-vertical" size={20} color="black" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* User Profile Section */}
+      <View style={styles.profileSection}>
+        <View style={styles.profileImageWrapper}>
+          <Avatar size={100} />
+          <View style={styles.onlineIndicatorLarge} />
+          <TouchableOpacity style={styles.reportButton}>
+            <Ionicons name="warning" size={20} color="#FF3B30" />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.userName}>Anya</Text>
+        <Text style={styles.userBio}>Marketing Specialist, loves indie music</Text>
+        <View style={styles.availabilityContainer}>
+          <Ionicons name="calendar-outline" size={16} color="#666" />
+          <Text style={styles.availabilityText}>Available Fri 3 PM for a coffee</Text>
+        </View>
+        <View style={styles.actionButtonsContainer}>
+          <TouchableOpacity style={styles.confirmButton}>
+            <Text style={styles.confirmButtonText}>Confirm Coffee</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.declineButton}>
+            <Text style={styles.declineButtonText}>Decline</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -167,46 +184,132 @@ const styles = StyleSheet.create({
   backButton: {
     padding: 5,
   },
-  userInfo: {
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    flex: 1,
+    textAlign: 'center',
+  },
+  headerIcons: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
-    marginLeft: 10,
+    gap: 15,
   },
-  avatarContainer: {
+  notificationIcon: {
     position: 'relative',
-    marginRight: 10,
   },
-  avatar: {
-    width: 40,
-    height: 40,
+  notificationBadge: {
+    position: 'absolute',
+    right: -5,
+    top: -5,
+    backgroundColor: 'red',
+    borderRadius: 10,
+    width: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  notificationCount: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  profileImageContainer: {
+    position: 'relative',
+  },
+  profileSection: {
+    alignItems: 'center',
+    paddingVertical: 25,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  profileImageWrapper: {
+    position: 'relative',
+    marginBottom: 15,
+  },
+  onlineIndicatorLarge: {
+    position: 'absolute',
+    right: 5,
+    bottom: 5,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#4CAF50',
+    borderWidth: 3,
+    borderColor: 'white',
+  },
+  reportButton: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: 'white',
     borderRadius: 20,
+    padding: 5,
+  },
+  userName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 5,
+    color: '#2F2F2F',
+  },
+  userBio: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 15,
+    textAlign: 'center',
+  },
+  availabilityContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 20,
+  },
+  availabilityText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+  },
+  confirmButton: {
+    flex: 1,
+    backgroundColor: '#7C4DFF',
+    borderRadius: 25,
+    padding: 15,
+    alignItems: 'center',
+  },
+  confirmButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  declineButton: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#7C4DFF',
+    borderRadius: 25,
+    padding: 15,
+    alignItems: 'center',
+  },
+  declineButtonText: {
+    color: '#7C4DFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   onlineIndicator: {
     position: 'absolute',
     right: 0,
     bottom: 0,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: '#4CAF50',
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: 'white',
-  },
-  userName: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  userStatus: {
-    fontSize: 12,
-    color: 'gray',
-  },
-  headerIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  notificationIcon: {
-    marginRight: 20,
   },
   messagesContainer: {
     flex: 1,
@@ -224,23 +327,23 @@ const styles = StyleSheet.create({
   },
   myMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: '#FF9500',
+    backgroundColor: '#7C4DFF',
     borderTopRightRadius: 4,
   },
   theirMessage: {
     alignSelf: 'flex-start',
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#F5F5F5',
     borderTopLeftRadius: 4,
   },
   messageText: {
-    fontSize: 16,
-    color: 'black',
+    fontSize: 15,
+    color: '#2F2F2F',
+    lineHeight: 20,
   },
   messageTime: {
-    fontSize: 10,
-    color: 'rgba(0,0,0,0.5)',
-    marginTop: 4,
-    alignSelf: 'flex-end',
+    fontSize: 11,
+    color: '#999',
+    marginTop: 5,
   },
   inputContainer: {
     flexDirection: 'row',
@@ -264,7 +367,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 5,
   },
   sendButton: {
-    backgroundColor: '#FF9500',
+    backgroundColor: '#7C4DFF',
     width: 40,
     height: 40,
     borderRadius: 20,

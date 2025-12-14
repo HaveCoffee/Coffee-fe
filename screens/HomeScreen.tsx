@@ -1,10 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { RootStackParamList } from '../navigation/types';
+import Avatar from '../components/Avatar';
 
 type Conversation = {
   id: string;
@@ -13,11 +12,10 @@ type Conversation = {
   time: string;
   unreadCount: number;
   isOnline: boolean;
-  image: any; // In a real app, this would be a URL or require()
 };
 
 const HomeScreen = () => {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState('All');
 
   // Mock data - in a real app, this would come from your state management
@@ -29,27 +27,40 @@ const HomeScreen = () => {
       time: '01/09/25',
       unreadCount: 3,
       isOnline: true,
-      image: require('../assets/placeholder-avatar.png'),
     },
     {
       id: '2',
       name: 'Sameer Sheikh',
-      lastMessage: 'Story of Yama and Yamuna Ac',
+      lastMessage: 'Monday Evening Works',
       time: '3:48 pm',
       unreadCount: 0,
       isOnline: false,
-      image: require('../assets/placeholder-avatar.png'),
     },
-    // Add more mock conversations as needed
+    {
+      id: '3',
+      name: 'Reen',
+      lastMessage: 'Story of Yama and Yamuna Ac',
+      time: '4:23 pm',
+      unreadCount: 0,
+      isOnline: false,
+    },
+    {
+      id: '4',
+      name: 'Rudhra',
+      lastMessage: "It's just a phase. I'll get over it.",
+      time: '2:59 pm',
+      unreadCount: 0,
+      isOnline: false,
+    },
   ];
 
   const renderConversationItem = ({ item }: { item: Conversation }) => (
     <TouchableOpacity 
       style={styles.conversationItem}
-      onPress={() => navigation.navigate('Chat', { matchId: item.id })}
+      onPress={() => router.push(`/(chat)/${item.id}`)}
     >
       <View style={styles.avatarContainer}>
-        <Image source={item.image} style={styles.avatar} />
+        <Avatar size={50} />
         {item.isOnline && <View style={styles.onlineIndicator} />}
       </View>
       <View style={styles.conversationContent}>
@@ -78,8 +89,7 @@ const HomeScreen = () => {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.time}>9:41</Text>
-        <Text style={styles.title}>Coffee</Text>
-        <View style={styles.headerIcons}>
+        <View style={styles.headerRight}>
           <TouchableOpacity style={styles.notificationIcon}>
             <Ionicons name="notifications-outline" size={24} color="black" />
             <View style={styles.notificationBadge}>
@@ -87,11 +97,11 @@ const HomeScreen = () => {
             </View>
           </TouchableOpacity>
           <TouchableOpacity style={styles.profileImageContainer}>
-            <Image 
-              source={require('../assets/placeholder-avatar.png')} 
-              style={styles.profileImage} 
-            />
+            <Avatar size={32} />
             <View style={styles.onlineIndicator} />
+          </TouchableOpacity>
+          <TouchableOpacity>
+            <Ionicons name="ellipsis-vertical" size={20} color="black" />
           </TouchableOpacity>
         </View>
       </View>
@@ -131,29 +141,6 @@ const HomeScreen = () => {
       <TouchableOpacity style={styles.fab}>
         <Ionicons name="add" size={30} color="white" />
       </TouchableOpacity>
-
-      {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="home" size={24} color="#FF9500" />
-          <Text style={styles.navText}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="compass-outline" size={24} color="gray" />
-          <Text style={styles.navText}>Discover</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navMicButton}>
-          <Ionicons name="mic" size={30} color="white" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="calendar-outline" size={24} color="gray" />
-          <Text style={styles.navText}>Plans</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="person-outline" size={24} color="gray" />
-          <Text style={styles.navText}>Profile</Text>
-        </TouchableOpacity>
-      </View>
     </SafeAreaView>
   );
 };
@@ -167,7 +154,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 15,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
@@ -175,13 +163,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  headerIcons: {
+  headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 15,
   },
   notificationIcon: {
     marginRight: 20,
@@ -205,11 +190,6 @@ const styles = StyleSheet.create({
   profileImageContainer: {
     position: 'relative',
   },
-  profileImage: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-  },
   onlineIndicator: {
     position: 'absolute',
     right: 0,
@@ -228,20 +208,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
   },
   tab: {
-    paddingVertical: 15,
-    marginRight: 25,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    paddingVertical: 8,
+    marginRight: 10,
+    paddingHorizontal: 16,
+    borderRadius: 20,
   },
   activeTab: {
-    borderBottomColor: '#4CAF50',
+    backgroundColor: '#4CAF50',
   },
   tabText: {
-    fontSize: 16,
+    fontSize: 14,
     color: 'gray',
   },
   activeTabText: {
-    color: '#4CAF50',
+    color: 'white',
     fontWeight: '600',
   },
   conversationList: {
@@ -257,11 +237,6 @@ const styles = StyleSheet.create({
   avatarContainer: {
     position: 'relative',
     marginRight: 15,
-  },
-  avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
   },
   conversationContent: {
     flex: 1,
@@ -301,46 +276,14 @@ const styles = StyleSheet.create({
   },
   fab: {
     position: 'absolute',
-    right: 25,
-    bottom: 90,
-    backgroundColor: '#FF9500',
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    right: 20,
+    bottom: 100,
+    backgroundColor: '#8B4513',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-  },
-  bottomNav: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    backgroundColor: 'white',
-  },
-  navItem: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  navText: {
-    fontSize: 12,
-    color: 'gray',
-    marginTop: 4,
-  },
-  navMicButton: {
-    backgroundColor: '#FF9500',
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: -30,
     elevation: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },

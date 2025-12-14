@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { authService } from '../services/authService';
 
 interface User {
   id: string;
@@ -29,10 +30,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const storedToken = await SecureStore.getItemAsync('authToken');
         if (storedToken) {
-          // You might want to fetch user data here
-          // const userData = await authService.getProfile(storedToken);
-          // setUser(userData);
           setToken(storedToken);
+          // Try to fetch user profile
+          try {
+            const userData = await authService.getProfile(storedToken);
+            setUser({
+              id: userData.user_id || userData.id || '',
+              name: userData.name || userData.full_name || 'User',
+              email: userData.email || '',
+              mobileNumber: userData.mobile_number || userData.mobileNumber || '',
+            });
+          } catch (error) {
+            console.error('Failed to fetch user profile:', error);
+            // Token might be invalid, clear it
+            await SecureStore.deleteItemAsync('authToken');
+            setToken(null);
+          }
         }
       } catch (error) {
         console.error('Failed to load auth state', error);
@@ -62,30 +75,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
+      // Call API logout if token exists
+      if (token) {
+        try {
+          await authService.logout(token);
+        } catch (error) {
+          console.error('API logout failed, clearing local data anyway:', error);
+        }
+      }
+      
       // Clear the authentication token from secure storage
       await SecureStore.deleteItemAsync('authToken');
+      await SecureStore.deleteItemAsync('refreshToken');
       
       // Reset all auth-related state
       setToken(null);
       setUser(null);
       
-      // Clear any other auth-related data if needed
-      // For example, if you have any other secure items:
-      // await SecureStore.deleteItemAsync('refreshToken');
-      
       // Navigate to the auth screen
       // Using replace to prevent going back to authenticated screens
       router.replace('/(auth)');
       
-      // Clear any cached data or subscriptions if needed
-      // For example:
-      // queryClient.clear(); // If you're using React Query
-      
       console.log('Successfully logged out');
     } catch (error) {
       console.error('Failed to log out:', error);
-      // You might want to handle this error in the UI
-      throw error; // Re-throw to allow components to handle the error if needed
+      // Still clear local state even if API call fails
+      setToken(null);
+      setUser(null);
+      await SecureStore.deleteItemAsync('authToken');
+      router.replace('/(auth)');
     }
   };
 

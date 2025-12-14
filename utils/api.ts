@@ -1,5 +1,11 @@
 // utils/api.ts
-const API_BASE_URL = 'http://3.110.104.45/api';
+// Auth API base URL (from http://3.110.104.45/api-docs/)
+const AUTH_API_BASE_URL = 'http://3.110.104.45/api';
+// Chat API base URL
+const CHAT_API_BASE_URL = 'http://3.110.104.45:3001/api/v1';
+
+// Default to auth API for backward compatibility
+const API_BASE_URL = AUTH_API_BASE_URL;
 
 interface ApiResponse {
   message: string;
@@ -10,8 +16,10 @@ export const apiRequest = async (
   endpoint: string,
   method: string = 'GET',
   data: any = null,
-  token: string | null = null
+  token: string | null = null,
+  baseUrl?: string
 ): Promise<ApiResponse> => {
+  const url = baseUrl || API_BASE_URL;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -27,8 +35,8 @@ export const apiRequest = async (
   };
 
   try {
-    console.log(`API Request: ${method} ${endpoint}`, { data });
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+    console.log(`API Request: ${method} ${url}${endpoint}`, { data });
+    const response = await fetch(`${url}${endpoint}`, config);
     
     // Clone the response to read it multiple times if needed
     const responseClone = response.clone();
@@ -66,3 +74,6 @@ export const apiRequest = async (
     throw error;
   }
 };
+
+// Export base URLs for use in services
+export { AUTH_API_BASE_URL, CHAT_API_BASE_URL };

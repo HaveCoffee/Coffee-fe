@@ -1,14 +1,15 @@
 // In otp-verification.tsx
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, Alert, ActivityIndicator } from 'react-native';
-import { Link, useLocalSearchParams, router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState, useEffect, useRef } from 'react';
-import { authService } from '../../services/authService';
-import * as SecureStore from 'expo-secure-store';
 import { Ionicons } from '@expo/vector-icons';
+import { Link, useLocalSearchParams } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
+import { authService } from '../../services/authService';
 
 export default function OTPVerification() {
   const { mobileNumber, flow } = useLocalSearchParams();
+  const { login } = useAuth();
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [isLoading, setIsLoading] = useState(false);
   const [timer, setTimer] = useState(30);
@@ -47,10 +48,17 @@ export default function OTPVerification() {
         response = await authService.loginVerify(mobileNumber as string, otpString, '');
       }
 
-      if (response.token) {
-        await SecureStore.setItemAsync('authToken', response.token);
-        // Navigate to home screen on successful verification
-        router.replace('/(tabs)');
+      const token = response.token || response.access_token;
+      if (token) {
+        // Use AuthContext login method which handles token storage and navigation
+        await login(token, {
+          user_id: response.user_id || response.id,
+          name: response.name || response.full_name,
+          email: response.email || '',
+          mobile_number: mobileNumber,
+        });
+      } else {
+        throw new Error('No token received from server');
       }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Verification failed');

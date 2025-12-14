@@ -103,7 +103,7 @@ export default function ReportAbuseScreen() {
 
         {/* Disclaimer */}
         <View style={styles.disclaimerContainer}>
-          <Ionicons name="warning" size={20} color="#FF9500" style={styles.warningIcon} />
+          <Ionicons name="alert-circle" size={20} style={styles.warningIcon} />
           <Text style={styles.disclaimerText}>
             Reports are anonymous. Content may be temporarily suspended pending investigation within 24 hours.
           </Text>
@@ -160,15 +160,16 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   selectedReportType: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: 'transparent',
     borderColor: '#FF3B30',
+    borderWidth: 2,
   },
   reportTypeText: {
-    color: '#333',
+    color: '#666',
   },
   selectedReportTypeText: {
-    color: '#fff',
-    fontWeight: '500',
+    color: '#FF3B30',
+    fontWeight: '600',
   },
   textInput: {
     borderWidth: 1,
@@ -183,27 +184,27 @@ const styles = StyleSheet.create({
   disclaimerContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    padding: 20,
-    backgroundColor: '#FFF9E6',
+    padding: 15,
     margin: 20,
     borderRadius: 10,
   },
   warningIcon: {
     marginRight: 10,
     marginTop: 2,
+    color: '#FF3B30',
   },
   disclaimerText: {
     flex: 1,
-    color: '#666',
-    fontSize: 14,
-    lineHeight: 20,
+    color: '#999',
+    fontSize: 13,
+    lineHeight: 18,
   },
   submitButton: {
     position: 'absolute',
     bottom: 20,
     left: 20,
     right: 20,
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#E1BEE7',
     borderRadius: 25,
     padding: 15,
     alignItems: 'center',

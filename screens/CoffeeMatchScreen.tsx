@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { RouteProp, useRoute } from '@react-navigation/native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
     SafeAreaView,
@@ -9,32 +9,29 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { RootStackParamList } from '../navigation/types';
-
-type CoffeeMatchScreenRouteProp = RouteProp<RootStackParamList, 'CoffeeMatch'>;
 
 export default function CoffeeMatchScreen() {
-  const route = useRoute<CoffeeMatchScreenRouteProp>();
-  const { matchId } = route.params;
+  const router = useRouter();
+  const { matchId } = useLocalSearchParams<{ matchId?: string }>();
 
   // Mock data - in a real app, this would come from your state management
   const matchData = {
     name: 'Elara',
     matchPercentage: 85,
-    sharedInterests: [
-      'Small-town to big city transition',
-      'Balancing parenting and career',
-      'New to the city',
+    matchReasons: [
+      'You are both small towners having moved to bigger cities to study and crave the comfortable life.',
+      "You're both navigating parenting and career",
+      "and Elara has recently started writing a new blog on parenting where she'd love to hear your point of view",
     ],
     recentContext: {
       text: "Meeting up with friends for coffee at 'The Daily Grind' this afternoon. Anyone else joining?",
-      time: '15 minutes ago',
+      time: '15 mins ago',
     },
     conversationTopics: [
-      'Andaz Apna Apna',
-      'Atlas Shrugged',
-      'The Louvre in Paris',
-      'AI for Education',
+      { text: 'Andaz Apna Apna', color: '#C8E6C9' },
+      { text: 'Atlas Shrugged', color: '#BBDEFB' },
+      { text: 'The Louvre in Paris', color: '#FFF9C4' },
+      { text: 'AI for Education', color: '#E1BEE7' },
     ],
   };
 
@@ -43,31 +40,26 @@ export default function CoffeeMatchScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton}>
+          <Text style={styles.headerTitle}>Coffee with {matchData.name}?</Text>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="black" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Coffee with {matchData.name}?</Text>
-          <View style={styles.headerIcons}>
-            <TouchableOpacity style={styles.reportButton}>
-              <Ionicons name="flag-outline" size={20} color="#FF3B30" />
-            </TouchableOpacity>
+        </View>
+
+        {/* Match Card */}
+        <View style={styles.matchCard}>
+          <View style={styles.matchHeader}>
+            <Text style={styles.matchCardTitle}>Chance you'll have a Good Conversation</Text>
+            <View style={styles.matchPercentageBadge}>
+              <Ionicons name="flash" size={16} color="#FF9500" />
+              <Text style={styles.matchPercentageText}>{matchData.matchPercentage}%</Text>
+            </View>
           </View>
-        </View>
-
-        {/* Match Percentage */}
-        <View style={styles.matchContainer}>
-          <Text style={styles.matchPercentage}>{matchData.matchPercentage}%</Text>
-          <Text style={styles.matchText}>chance of a great conversation</Text>
-        </View>
-
-        {/* Shared Interests */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>You both share</Text>
-          <View style={styles.tagsContainer}>
-            {matchData.sharedInterests.map((interest, index) => (
-              <View key={index} style={styles.tag}>
-                <Text style={styles.tagText}>{interest}</Text>
-              </View>
+          <View style={styles.matchReasonsContainer}>
+            {matchData.matchReasons.map((reason, index) => (
+              <Text key={index} style={styles.matchReason}>
+                {reason}
+              </Text>
             ))}
           </View>
         </View>
@@ -88,23 +80,24 @@ export default function CoffeeMatchScreen() {
 
         {/* Conversation Topics */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Feel Free to Bring Up</Text>
+          <Text style={styles.sectionTitle}>Feel Free to Bring uUp</Text>
           <View style={styles.tagsContainer}>
             {matchData.conversationTopics.map((topic, index) => (
-              <View key={index} style={[styles.tag, styles.topicTag]}>
-                <Text style={styles.topicTagText}>{topic}</Text>
+              <View key={index} style={[styles.topicTag, { backgroundColor: topic.color }]}>
+                <Text style={styles.topicTagText}>{topic.text}</Text>
               </View>
             ))}
           </View>
         </View>
       </ScrollView>
 
-      {/* Action Buttons */}
+      {/* Action Button */}
       <View style={styles.actionButtons}>
-        <TouchableOpacity style={styles.declineButton}>
-          <Text style={styles.declineButtonText}>Decline</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.chatButton}>
+        <TouchableOpacity 
+          style={styles.chatButton}
+          onPress={() => router.push(`/(chat)/${matchId || '1'}`)}
+        >
+          <Ionicons name="paper-plane" size={20} color="white" style={styles.chatButtonIcon} />
           <Text style={styles.chatButtonText}>Chat Now</Text>
         </TouchableOpacity>
       </View>
@@ -128,38 +121,52 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
-  backButton: {
-    padding: 5,
-  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
     flex: 1,
     textAlign: 'center',
-    marginHorizontal: 10,
   },
-  headerIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  reportButton: {
+  backButton: {
     padding: 5,
   },
-  matchContainer: {
-    alignItems: 'center',
-    paddingVertical: 30,
+  matchCard: {
+    backgroundColor: '#F3E5F5',
+    margin: 20,
+    padding: 20,
+    borderRadius: 15,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
-  matchPercentage: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#4CAF50',
-    marginBottom: 5,
+  matchHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
   },
-  matchText: {
+  matchCardTitle: {
     fontSize: 16,
-    color: 'gray',
+    fontWeight: '600',
+    flex: 1,
+    marginRight: 10,
+  },
+  matchPercentageBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  matchPercentageText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FF9500',
+  },
+  matchReasonsContainer: {
+    gap: 10,
+  },
+  matchReason: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#2F2F2F',
   },
   section: {
     padding: 20,
@@ -194,10 +201,16 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   topicTag: {
-    backgroundColor: '#E3F2FD',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginRight: 10,
+    marginBottom: 10,
   },
   topicTagText: {
-    color: '#1976D2',
+    fontSize: 14,
+    color: '#2F2F2F',
+    fontWeight: '500',
   },
   contextCard: {
     backgroundColor: '#f9f9f9',
@@ -214,8 +227,7 @@ const styles = StyleSheet.create({
     color: 'gray',
   },
   actionButtons: {
-    flexDirection: 'row',
-    padding: 15,
+    padding: 20,
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
@@ -224,25 +236,17 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
   },
-  declineButton: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 25,
-    padding: 15,
-    marginRight: 10,
-    alignItems: 'center',
-  },
-  declineButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
   chatButton: {
-    flex: 2,
     backgroundColor: '#4CAF50',
     borderRadius: 25,
     padding: 15,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  chatButtonIcon: {
+    marginRight: 0,
   },
   chatButtonText: {
     fontSize: 16,

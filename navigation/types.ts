@@ -1,13 +1,12 @@
 // navigation/types.ts
 export type RootStackParamList = {
   Auth: undefined;
+  OtpVerification: { phoneNumber: string };
   Main: undefined;
-  Chat: { matchId: string };
-  Profile: undefined;
-  EditProfile: undefined;
-  ReportAbuse: undefined;
-  CoffeeMatch: { matchId: string };
   Conversation: { conversationId: string };
+  CoffeeMatch: { matchId: string };
+  ReportAbuse: undefined;
+  Profile: undefined;
 };
 
 export type MainTabParamList = {
@@ -15,4 +14,10 @@ export type MainTabParamList = {
   Discover: undefined;
   Plans: undefined;
   Profile: undefined;
+};
+
+export type AuthStackParamList = {
+  Login: undefined;
+  Signup: undefined;
+  OtpVerification: { phoneNumber: string };
 };
