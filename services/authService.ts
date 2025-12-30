@@ -1,295 +1,310 @@
+// services/authService.ts
+// Authentication service integrated with MessageCentral VerifyNow
+
 import * as SecureStore from 'expo-secure-store';
+import API_ENDPOINTS from '../constants/apiEndpoints';
+import { AUTH_TOKEN_KEY, REFRESH_TOKEN_KEY } from '../constants/auth';
 import { apiRequest, AUTH_API_BASE_URL } from '../utils/api';
-import { mockAuthService } from './mockAuthService';
+// import { mockAuthService } from './mockAuthService';
 
-// Use mock service in development (set to false to use real API)
-const useMockService = false;
+// Toggle mock service disabled – always use real service
 
-const withCountryCode = (mobileNumber: string) => {
-  // Remove all non-numeric characters except leading +
-  const cleaned = `${mobileNumber}`.replace(/[^0-9+]/g, '');
-  
-  // If already in E.164 format with country code, return as is
-  if (cleaned.startsWith('+')) return cleaned;
-  
-  // If it starts with 91, add + prefix
-  if (cleaned.startsWith('91') && cleaned.length > 10) {
-    return `+${cleaned}`;
+// Map VerifyNow backend error codes to user-friendly messages
+const mapVerifyNowErrorMessage = (error: any, fallback: string): string => {
+  const code = String(
+    error?.response?.errorCode ??
+    error?.response?.code ??
+    error?.code ??
+    '',
+  );
+
+  switch (code) {
+    case '702':
+      return 'Invalid or incorrect OTP. Please try again.';
+    case '705':
+      return 'OTP has expired. Please request a new one.';
+    case '703':
+      return 'User not registered. Please sign up first.';
+    case '700':
+      return 'Invalid request. Please check the details and try again.';
+    case '800':
+      return 'Verification service is temporarily unavailable. Please try again later.';
+    default:
+      return error?.message || fallback;
   }
-  
-  // Default: add +91 prefix and ensure no spaces
-  return `+91${cleaned.replace(/^0+/, '')}`; // Remove any leading zeros
 };
 
-// Real implementation based on API documentation
+// -----------------------------------------------------------------------------
+// REAL AUTH SERVICE (VerifyNow flow)
+// -----------------------------------------------------------------------------
 const realAuthService = {
   /**
-   * Initialize signup - sends OTP to mobile number
-   * POST /auth/signup/init
+   * Signup: send OTP via AWS auth service (/auth/signup/init)
    */
   async signupInit(mobileNumber: string) {
+    // Ensure no stale token carried over (e.g. dev-mock-token)
+    await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+
     try {
-      const formattedNumber = withCountryCode(mobileNumber);
-      console.log('[AUTH] Signup init for:', formattedNumber);
-      
+      const cleanedNumber = `${mobileNumber}`.replace(/[^0-9]/g, '');
+
       const response = await apiRequest(
-        '/auth/signup/init', 
-        'POST', 
-        { mobileNumber: formattedNumber },
+        API_ENDPOINTS.AUTH.SIGNUP_INIT,
+        'POST',
+        { mobileNumber: cleanedNumber },
         null,
-        AUTH_API_BASE_URL
+        AUTH_API_BASE_URL,
       );
-      
-      console.log('Signup init response:', response);
-      return response;
-    } catch (error: any) {
-      console.error('Error in signupInit:', error);
-      
-      // Handle specific error cases
-      if (error.message?.includes('already exists') || error.message?.includes('USER_ALREADY_EXISTS')) {
-        throw new Error('USER_ALREADY_EXISTS');
-      } else if (error.message?.includes('rate limit') || error.message?.includes('too many')) {
-        throw new Error('Too many attempts. Please try again in a few minutes.');
-      } else if (error.message?.includes('network') || error.message?.includes('fetch')) {
-        throw new Error('Network error. Please check your connection and try again.');
+
+      if (!response?.verificationId) {
+        throw new Error('Failed to initiate signup. Please try again.');
       }
-      
-      throw new Error(error.message || 'Failed to send OTP. Please try again.');
+
+      const token = response?.token ?? null;
+      if (token) {
+        await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+      }
+
+      return {
+        message: response.message || 'OTP sent successfully',
+        verificationId: response.verificationId,
+        token,
+      };
+    } catch (error: any) {
+      throw new Error(mapVerifyNowErrorMessage(error, 'Failed to send OTP. Please try again.'));
     }
   },
 
   /**
-   * Verify signup OTP and complete registration
-   * POST /auth/signup/verify
+   * Signup: verify OTP via AWS auth service (/auth/signup/verify)
    */
-  async signupVerify(mobileNumber: string, otp: string, password?: string) {
+  async signupVerify(mobileNumber: string, verificationId: string, otp: string) {
     try {
-      const formattedNumber = withCountryCode(mobileNumber);
-      console.log('[AUTH] Signup verify for:', formattedNumber);
-      
+      const cleanedNumber = `${mobileNumber}`.replace(/[^0-9]/g, '');
+
       const response = await apiRequest(
-        '/auth/signup/verify', 
-        'POST', 
-        { 
-          mobileNumber: formattedNumber,
+        API_ENDPOINTS.AUTH.SIGNUP_VERIFY,
+        'POST',
+        {
+          mobileNumber: cleanedNumber,
           otp,
-          password: password || '', // Optional password
+          verificationId,
         },
-        null,
-        AUTH_API_BASE_URL
       );
-      
-      console.log('Signup verify response:', response);
-      
-      // Store token if provided
-      if (response.token || response.access_token) {
-        const token = response.token || response.access_token;
-        await SecureStore.setItemAsync('authToken', token);
+
+      const token = response?.token ?? null;
+      if (token) {
+        await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
       }
-      
-      return response;
+      return {
+        message: response?.message || 'User verified successfully',
+        token,
+        user: response?.user,
+        verificationStatus: response?.verificationStatus,
+      };
     } catch (error: any) {
-      console.error('Error in signupVerify:', error);
-      
-      if (error.message?.includes('invalid') || error.message?.includes('expired')) {
-        throw new Error('Invalid or expired OTP. Please request a new one.');
-      } else if (error.message?.includes('network')) {
-        throw new Error('Network error. Please check your connection and try again.');
-      }
-      
-      throw new Error(error.message || 'Verification failed. Please try again.');
+      throw new Error(mapVerifyNowErrorMessage(error, 'Verification failed. Please try again.'));
     }
   },
 
   /**
-   * Initialize login - sends OTP to mobile number
-   * POST /auth/login/init
+   * Login: send OTP via AWS auth service (/auth/login/init)
    */
   async loginInit(mobileNumber: string) {
+    // Ensure no stale token is sent
+    await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+
     try {
-      const formattedNumber = withCountryCode(mobileNumber);
-      console.log('[AUTH] Login init for:', formattedNumber);
-      
+      const cleanedNumber = `${mobileNumber}`.replace(/[^0-9]/g, '');
+
       const response = await apiRequest(
-        '/auth/login/init', 
-        'POST', 
-        { mobileNumber: formattedNumber },
+        API_ENDPOINTS.AUTH.LOGIN_INIT,
+        'POST',
+        { mobileNumber: cleanedNumber },
         null,
-        AUTH_API_BASE_URL
+        AUTH_API_BASE_URL,
       );
-      
-      console.log('Login init response:', response);
-      return response;
-    } catch (error: any) {
-      console.error('Error in loginInit:', error);
-      
-      if (error.message?.includes('not found') || error.message?.includes('does not exist')) {
-        throw new Error('User not found. Please sign up first.');
-      } else if (error.message?.includes('rate limit') || error.message?.includes('too many')) {
-        throw new Error('Too many attempts. Please try again in a few minutes.');
-      } else if (error.message?.includes('network')) {
-        throw new Error('Network error. Please check your connection and try again.');
+
+      if (!response?.verificationId) {
+        throw new Error('Failed to initiate login. Please try again.');
       }
-      
-      throw new Error(error.message || 'Failed to send OTP. Please try again.');
+
+      const token = response?.token ?? null;
+      if (token) {
+        await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+      }
+
+      return {
+        message: response.message || 'OTP sent successfully',
+        verificationId: response.verificationId,
+        token,
+      };
+    } catch (error: any) {
+      throw new Error(mapVerifyNowErrorMessage(error, 'Failed to send OTP. Please try again.'));
     }
   },
 
   /**
-   * Verify login OTP
-   * POST /auth/login/verify
+   * Login: verify OTP via AWS auth service (/auth/login/verify)
    */
-  async loginVerify(mobileNumber: string, otp: string, password?: string) {
+  async loginVerify(mobileNumber: string, verificationId: string, otp: string) {
     try {
-      const formattedNumber = withCountryCode(mobileNumber);
-      console.log('[AUTH] Login verify for:', formattedNumber);
-      
+      const cleanedNumber = `${mobileNumber}`.replace(/[^0-9]/g, '');
+
       const response = await apiRequest(
-        '/auth/login/verify', 
-        'POST', 
+        API_ENDPOINTS.AUTH.LOGIN_VERIFY,
+        'POST',
         {
-          mobileNumber: formattedNumber,
+          mobileNumber: cleanedNumber,
           otp,
-          password: password || '', // Optional password
+          verificationId,
         },
-        null,
-        AUTH_API_BASE_URL
       );
-      
-      console.log('Login verify response:', response);
-      
-      // Store token if provided
-      if (response.token || response.access_token) {
-        const token = response.token || response.access_token;
-        await SecureStore.setItemAsync('authToken', token);
+
+      const token = response?.token ?? null;
+      if (token) {
+        await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
       }
-      
-      return response;
+
+      return {
+        message: response?.message || 'Login successful',
+        token,
+        verificationStatus: response?.verificationStatus,
+        ...response,
+      };
     } catch (error: any) {
-      console.error('Error in loginVerify:', error);
-      
-      if (error.message?.includes('invalid') || error.message?.includes('expired')) {
-        throw new Error('Invalid or expired OTP. Please request a new one.');
-      } else if (error.message?.includes('unauthorized') || error.message?.includes('credentials')) {
-        throw new Error('Invalid credentials. Please try again.');
-      } else if (error.message?.includes('network')) {
-        throw new Error('Network error. Please check your connection and try again.');
-      }
-      
-      throw new Error(error.message || 'Verification failed. Please try again.');
+      throw new Error(mapVerifyNowErrorMessage(error, 'Verification failed. Please try again.'));
     }
   },
 
-  /**
-   * Get user profile
-   * GET /auth/profile
-   */
+  // ---------------------------------------------------------------------------
+  // The following helpers (profile, refreshToken, logout) still rely on the
+  // legacy API server and therefore keep the original apiRequest-based logic.
+  // ---------------------------------------------------------------------------
+
   async getProfile(token?: string) {
     try {
       const authToken = token || await getAuthToken();
-      if (!authToken) {
-        throw new Error('No authentication token available');
+      if (!authToken) throw new Error('No authentication token available');
+
+      const possibleEndpoints = [
+        '/auth/profile',
+        '/profile',
+        '/user/profile',
+        '/user',
+        '/auth/user',
+      ];
+
+      let response;
+      let lastError;
+      for (const endpoint of possibleEndpoints) {
+        try {
+          response = await apiRequest(endpoint, 'GET', null, authToken, AUTH_API_BASE_URL);
+          if (response) break;
+        } catch (err: any) {
+          lastError = err;
+          if (err.message?.includes('404')) continue;
+          throw err;
+        }
       }
-      
-      const response = await apiRequest(
-        '/auth/profile', 
-        'GET', 
-        null, 
-        authToken,
-        AUTH_API_BASE_URL
-      );
-      
+      if (!response) throw lastError || new Error('Failed to fetch profile');
       return response;
     } catch (error: any) {
-      console.error('Error in getProfile:', error);
+      if (error.message?.includes('401') || error.message?.includes('expired')) {
+        await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+        throw new Error('Session expired. Please login again.');
+      }
       throw error;
     }
   },
 
-  /**
-   * Refresh authentication token
-   * POST /auth/refresh
-   */
-  async refreshToken(refreshToken: string) {
-    try {
-      const response = await apiRequest(
-        '/auth/refresh',
-        'POST',
-        { refreshToken },
-        null,
-        AUTH_API_BASE_URL
-      );
-      
-      if (response.token || response.access_token) {
-        const token = response.token || response.access_token;
-        await SecureStore.setItemAsync('authToken', token);
+  async updateProfile(profileData: any, token?: string) {
+    const authToken = token || (await getAuthToken());
+    if (!authToken) throw new Error('No authentication token available');
+
+    const possibleEndpoints = [
+      '/auth/profile',
+      '/profile',
+      '/user/profile',
+      '/user',
+      '/auth/user',
+    ];
+
+    let response;
+    let lastError;
+    for (const endpoint of possibleEndpoints) {
+      try {
+        response = await apiRequest(endpoint, 'PUT', profileData, authToken, AUTH_API_BASE_URL);
+        if (response) break;
+      } catch (err: any) {
+        lastError = err;
+        if (err.message?.includes('404')) continue;
+        throw err;
       }
-      
-      return response;
-    } catch (error: any) {
-      console.error('Error in refreshToken:', error);
-      throw error;
     }
+    if (!response) throw lastError || new Error('Failed to update profile');
+    return response;
   },
 
-  /**
-   * Logout - invalidate token
-   * POST /auth/logout
-   */
+  async refreshToken(refreshToken?: string) {
+    const storedRefreshToken = refreshToken || await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+    if (!storedRefreshToken) throw new Error('No refresh token available');
+
+    const response = await apiRequest(
+      '/auth/refresh',
+      'POST',
+      { refreshToken: storedRefreshToken },
+      AUTH_API_BASE_URL,
+    );
+
+    const token = response.token || response.access_token || response.accessToken;
+    if (!token) throw new Error('No token received from refresh endpoint');
+
+    await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+    if (response.refresh_token || response.refreshToken) {
+      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, response.refresh_token || response.refreshToken);
+    }
+    return { token, refresh_token: response.refresh_token || response.refreshToken || storedRefreshToken };
+  },
+
   async logout(token?: string) {
     try {
       const authToken = token || await getAuthToken();
       if (authToken) {
-        await apiRequest(
-          '/auth/logout',
-          'POST',
-          null,
-          authToken,
-          AUTH_API_BASE_URL
-        );
+        try {
+          await apiRequest('/auth/logout', 'POST', null, authToken, AUTH_API_BASE_URL);
+        } catch {
+          // Ignore API logout failure – proceed to local cleanup
+        }
       }
-      
-      // Clear local token regardless of API call success
-      await SecureStore.deleteItemAsync('authToken');
-      await SecureStore.deleteItemAsync('refreshToken');
-    } catch (error: any) {
-      console.error('Error in logout:', error);
-      // Still clear local token even if API call fails
-      await SecureStore.deleteItemAsync('authToken');
-      await SecureStore.deleteItemAsync('refreshToken');
+    } finally {
+      await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
     }
   },
 };
 
-/**
- * Get stored authentication token
- */
+// -----------------------------------------------------------------------------
+// Token helpers (shared across mock & real services)
+// -----------------------------------------------------------------------------
 export const getAuthToken = async (): Promise<string | null> => {
   try {
-    return await SecureStore.getItemAsync('authToken');
-  } catch (error) {
-    console.error('Error getting auth token:', error);
+    return await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+  } catch {
     return null;
   }
 };
 
-// Export the appropriate service based on environment
-export const authService = useMockService 
-  ? { 
-      ...mockAuthService,
-      getAuthToken,
-      // Add any additional methods from realAuthService that aren't in mockAuthService
-      ...Object.keys(realAuthService).reduce((acc: any, key) => {
-        if (!(key in mockAuthService)) {
-          acc[key] = (realAuthService as any)[key];
-        }
-        return acc;
-      }, {})
-    }
-  : { ...realAuthService, getAuthToken };
+export const getRefreshToken = async (): Promise<string | null> => {
+  try {
+    return await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+};
 
-// Log which service is being used
-console.log(`Using ${useMockService ? 'MOCK' : 'REAL'} authentication service`);
+export const authService = { ...realAuthService, getAuthToken, getRefreshToken };
 
-// For TypeScript type checking
+console.log('Using REAL authentication service');
+
 export type AuthService = typeof authService;

@@ -1,80 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
-
-// Mock data - replace with actual data from your API
-const CHAT_DATA = {
-  'ella': {
-    name: 'Ella',
-    messages: [
-      { id: '1', text: 'Hello! How can I help you today?', sent: false, time: '10:30 AM' },
-      { id: '2', text: 'I\'d like to know more about your coffee selection', sent: true, time: '10:31 AM' },
-      { id: '3', text: 'Of course! We have a wide variety of coffee beans from different regions.', sent: false, time: '10:32 AM' },
-    ]
-  },
-  'support': {
-    name: 'Support Team',
-    messages: [
-      { id: '1', text: 'Your order #12345 has been confirmed', sent: false, time: '9:15 AM' },
-      { id: '2', text: 'Thanks! When will it be delivered?', sent: true, time: '9:16 AM' },
-    ]
-  },
-  'updates': {
-    name: 'Order Updates',
-    messages: [
-      { id: '1', text: 'Your coffee is on its way!', sent: false, time: '2:30 PM' },
-      { id: '2', text: 'Great! Looking forward to it.', sent: true, time: '2:35 PM' },
-    ]
-  }
-};
+import ConversationScreen from '../../screens/ConversationScreen';
 
 export default function ChatScreen() {
-  const { id } = useLocalSearchParams();
-  const router = useRouter();
-  const [message, setMessage] = useState('');
-  const [messages, setMessages] = useState([]);
-  const flatListRef = useRef(null);
-
-  // Initialize chat data
-  useEffect(() => {
-    if (id && CHAT_DATA[id]) {
-      setMessages(CHAT_DATA[id].messages);
-    }
-  }, [id]);
-
-  const sendMessage = async () => {
-    if (message.trim() === '') return;
-    
-    const newMessage = {
-      id: Date.now().toString(),
-      text: message,
-      sent: true,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    setMessages(prev => [...prev, newMessage]);
-    setMessage('');
-
-    try {
-      // Uncomment this when your API is ready
-      // await chatService.sendMessage(message);
-      
-      // Simulate a response
-      setTimeout(() => {
-        const responseMessage = {
-          id: (Date.now() + 1).toString(),
-          text: `This is an automated response to: ${message}`,
-          sent: false,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        setMessages(prev => [...prev, responseMessage]);
-      }, 1000);
-    } catch (error) {
-      console.error('Error sending message:', error);
-    }
-  };
+  // This route now uses the ConversationScreen component
+  return <ConversationScreen />;
 
   const renderMessage = ({ item }) => (
     <View style={[

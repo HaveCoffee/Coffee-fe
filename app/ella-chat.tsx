@@ -1,43 +1,138 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Dimensions,
-    FlatList,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  BackHandler,
+  Dimensions,
+  FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../components/Avatar';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { chatService, MatchCard, Message, OptionButton } from '../services/chatService';
+import { coffeeMlService } from '../services/coffeeMlService';
+import { logVerificationResults, verifyChatAPIEndpoints } from '../utils/apiVerifier';
 
 const { width } = Dimensions.get('window');
+const INPUT_BAR_MIN_HEIGHT = 60;
 
 export default function EllaChat() {
+  const params = useLocalSearchParams<{ onboarding?: string }>();
+  const isOnboarding = params.onboarding === 'true';
+  
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const flatListRef = useRef<FlatList>(null);
+  const inputContainerRef = useRef<View>(null);
   const router = useRouter();
   const { isRecording, startRecording, stopRecording } = useVoiceRecorder();
+  const insets = useSafeAreaInsets();
+
+  // Keyboard show/hide handlers
+  useEffect(() => {
+    const updateKeyboardSpace = (event: any) => {
+      setKeyboardHeight(event.endCoordinates.height);
+      setIsKeyboardVisible(true);
+      // Scroll to bottom when keyboard appears
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    };
+
+    const resetKeyboardSpace = () => {
+      setKeyboardHeight(0);
+      setIsKeyboardVisible(false);
+    };
+
+    const keyboardWillShow = Keyboard.addListener(
+      'keyboardWillShow',
+      updateKeyboardSpace
+    );
+    const keyboardDidShow = Keyboard.addListener(
+      'keyboardDidShow',
+      updateKeyboardSpace
+    );
+    const keyboardWillHide = Keyboard.addListener(
+      'keyboardWillHide',
+      resetKeyboardSpace
+    );
+    const keyboardDidHide = Keyboard.addListener(
+      'keyboardDidHide',
+      resetKeyboardSpace
+    );
+
+    return () => {
+      keyboardWillShow.remove();
+      keyboardDidShow.remove();
+      keyboardWillHide.remove();
+      keyboardDidHide.remove();
+    };
+  }, []);
 
   const loadChatHistory = useCallback(async () => {
     try {
       setIsLoading(true);
+      
+      // Load stored thread_id for conversation continuity
+      const storedThreadId = await chatService.getThreadId();
+      setThreadId(storedThreadId);
+      
+      // Verify API endpoints in development mode (only once)
+      if (__DEV__ && !(global as any).__API_VERIFIED__) {
+        (global as any).__API_VERIFIED__ = true;
+        const results = await verifyChatAPIEndpoints();
+        logVerificationResults(results);
+      }
+      
+      // Coffee-ml API doesn't provide chat history endpoint
+      // Conversation continuity is maintained via thread_id
+      // Start with a welcome message
       const history = await chatService.getChatHistory();
-      setMessages(history);
+      if (history.length === 0) {
+        const welcomeMessage = isOnboarding
+          ? "Hi! I'm Ella, your AI assistant. I'll help you set up your profile by getting to know you better. Let's start with a few questions - what are you interested in?"
+          : "Hey There! How are you doing today?";
+        setMessages([{
+          id: 'welcome',
+          type: 'text',
+          content: welcomeMessage,
+          sender: 'bot',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          status: 'sent',
+        }]);
+      } else {
+        setMessages(history);
+      }
     } catch (error) {
       console.error('Error loading chat history:', error);
+      // Set a welcome message even if history fails to load
+      const welcomeMessage = isOnboarding
+        ? "Hi! I'm Ella, your AI assistant. I'll help you set up your profile by getting to know you better. Let's start with a few questions - what are you interested in?"
+        : "Hey There! How are you doing today?";
+      setMessages([{
+        id: 'welcome',
+        type: 'text',
+        content: welcomeMessage,
+        sender: 'bot',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        status: 'sent',
+      }]);
     } finally {
       setIsLoading(false);
     }
@@ -46,7 +141,18 @@ export default function EllaChat() {
   useFocusEffect(
     useCallback(() => {
       loadChatHistory();
-    }, [loadChatHistory])
+
+      const onBackPress = () => {
+        router.replace('/(tabs)');
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+      return () => {
+        subscription.remove();
+      };
+    }, [loadChatHistory, router])
   );
 
   useEffect(() => {
@@ -56,6 +162,45 @@ export default function EllaChat() {
       }, 100);
     }
   }, [messages]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'android' ? 'keyboardDidShow' : 'keyboardWillShow';
+    const hideEvent = Platform.OS === 'android' ? 'keyboardDidHide' : 'keyboardWillHide';
+
+    const showSub = Keyboard.addListener(showEvent, () => {
+      setIsKeyboardVisible(true);
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 50);
+    });
+
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // Check if profile is complete
+  const checkProfileComplete = useCallback(async (): Promise<boolean> => {
+    try {
+      const profile = await coffeeMlService.getOwnProfile();
+      // Profile is complete if it has profile_data with meaningful content
+      if (!profile?.profile_data) {
+        return false;
+      }
+      const hasVibeSummary = Boolean(profile.profile_data.vibe_summary);
+      const hasInterests = Boolean(profile.profile_data.interests && profile.profile_data.interests.length > 0);
+      return hasVibeSummary || hasInterests;
+    } catch (error: any) {
+      // If profile doesn't exist or endpoint fails, assume incomplete
+      console.log('Profile check failed:', error);
+      return false;
+    }
+  }, []);
 
   const handleSend = async (text?: string) => {
     const message = (text ?? inputText).trim();
@@ -77,13 +222,36 @@ export default function EllaChat() {
     setMessages(prev => [...prev, userMessage]);
 
     try {
-      const response = await chatService.sendMessage(message);
-      setMessages(prev =>
-        prev.map(m =>
-          m.id === tempId ? { ...m, status: 'sent' } : m
-        ).concat(response)
-      );
+      // Send message with current thread_id for conversation continuity
+      const response = await chatService.sendMessage(message, threadId || undefined);
+      
+      // Update thread_id from response
+      const newThreadId = await chatService.getThreadId();
+      if (newThreadId && newThreadId !== threadId) {
+        setThreadId(newThreadId);
+      }
+      
+      // Update the temporary message status and add bot response
+      setMessages(prev => {
+        const updated = prev.map(m =>
+          m.id === tempId ? { ...m, status: 'sent' as const } : m
+        );
+        return [...updated, response];
+      });
+
+      // If in onboarding mode, check if profile is now complete after each message
+      if (isOnboarding) {
+        // Wait a bit for the AI to process and save profile data
+        setTimeout(async () => {
+          const isComplete = await checkProfileComplete();
+          if (isComplete) {
+            // Profile is complete, navigate to main app
+            router.replace('/(tabs)');
+          }
+        }, 2000); // Give the backend time to save profile data
+      }
     } catch (error) {
+      console.error('Error sending message:', error);
       setMessages(prev =>
         prev.map(m =>
           m.id === tempId ? { ...m, status: 'failed' } : m
@@ -189,7 +357,7 @@ export default function EllaChat() {
                 <View style={styles.interestsContainer}>
                   <Text style={styles.interestsLabel}>Shared Interests:</Text>
                   <View style={styles.interestsTags}>
-                    {(item.content as MatchCard).sharedInterests.map((interest, index) => (
+                    {(item.content as MatchCard).sharedInterests.map((interest: string, index: number) => (
                       <View key={index} style={styles.interestTag}>
                         <Text style={styles.interestTagText}>{interest}</Text>
                       </View>
@@ -237,10 +405,10 @@ export default function EllaChat() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.replace('/(tabs)')} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#2F2F2F" />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
@@ -252,66 +420,70 @@ export default function EllaChat() {
       </View>
 
       {/* Chat Messages */}
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.chatContent}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-      />
-
-      {/* Input Bar */}
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        style={styles.chatWrapper}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
-        <View style={styles.inputContainer}>
-          <TouchableOpacity style={styles.attachmentButton}>
-            <Ionicons name="attach" size={24} color="#666" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.cameraButton}>
-            <Ionicons name="camera-outline" size={24} color="#666" />
-          </TouchableOpacity>
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={[
+            styles.chatContent,
+            { 
+              paddingBottom: Math.max(
+                INPUT_BAR_MIN_HEIGHT + 24 + insets.bottom,
+                keyboardHeight > 0 ? keyboardHeight + INPUT_BAR_MIN_HEIGHT + 32 : 0  // Increased spacing
+              )
+            },
+          ]}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        />
+
+        {/* Input Bar */}
+        <View
+          ref={inputContainerRef}
+          style={[
+            styles.inputContainer,
+            { 
+              paddingBottom: Math.max(insets.bottom, 8),
+              minHeight: INPUT_BAR_MIN_HEIGHT,
+              paddingHorizontal: 16,
+              paddingTop: 8,
+              justifyContent: 'space-between',
+              backgroundColor: '#fff',
+              borderTopWidth: StyleSheet.hairlineWidth,
+              borderTopColor: '#E5E5E5',
+              transform: [
+                { translateY: -keyboardHeight },
+              ],
+              marginBottom: keyboardHeight > 0 ? 8 : 0, // Add extra margin when keyboard is visible
+            },
+          ]}
+        >
           <TextInput
             value={inputText}
             onChangeText={setInputText}
             placeholder="Type your message..."
             placeholderTextColor="#999"
-            style={styles.input}
+            style={[styles.input, { flex: 1, marginRight: 8 }]}
             multiline
             maxLength={500}
+            autoFocus
+            onFocus={() => {
+              setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+            }}
           />
           <TouchableOpacity
-            style={styles.sendButton}
+            style={[styles.sendButton, { marginLeft: 8 }]}
             onPress={() => handleSend()}
             disabled={!inputText.trim()}
           >
             <Ionicons name="send" size={20} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.voiceButton}
-            onPress={async () => {
-              if (isRecording) {
-                const uri = await stopRecording();
-                if (uri) {
-                  try {
-                    const response = await chatService.sendVoiceMessage(uri);
-                    setMessages(prev => [...prev, response]);
-                  } catch (error) {
-                    console.error('Error sending voice message:', error);
-                  }
-                }
-              } else {
-                await startRecording();
-              }
-            }}
-          >
-            <Ionicons 
-              name={isRecording ? "stop" : "mic"} 
-              size={24} 
-              color={isRecording ? "#FF3B30" : "#7C4DFF"} 
-            />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -344,6 +516,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  chatWrapper: {
+    flex: 1,
+    position: 'relative',
+  },
+  chatContent: {
+    flexGrow: 1,
+    padding: 16,
+    paddingBottom: 100, // Increased padding at bottom to account for input container and extra space
   },
   loadingContainer: {
     flex: 1,
@@ -553,30 +734,20 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    paddingTop: 8,
     backgroundColor: '#fff',
-  },
-  attachmentButton: {
-    padding: 8,
-    marginRight: 4,
-  },
-  cameraButton: {
-    padding: 8,
-    marginRight: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E5E5',
   },
   input: {
-    flex: 1,
-    maxHeight: 100,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 16,
-    color: '#2F2F2F',
+    minHeight: 40,
+    maxHeight: 120,
     backgroundColor: '#F5F5F5',
     borderRadius: 20,
-    marginHorizontal: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    fontSize: 16,
+    color: '#333',
   },
   sendButton: {
     width: 36,
@@ -585,10 +756,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#7C4DFF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 4,
-  },
-  voiceButton: {
-    padding: 8,
     marginLeft: 4,
   },
   recordingOverlay: {

@@ -3,11 +3,13 @@ import { Link, router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { authService } from '../../services/authService';
 
 export default function LoginScreen() {
   const [mobileNumber, setMobileNumber] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { login } = useAuth();
 
   const handleGetOTP = async () => {
     if (!mobileNumber) {
@@ -27,39 +29,50 @@ export default function LoginScreen() {
       const response = await authService.loginInit(mobileNumber);
       console.log('OTP API Response:', response);
       
-      if (!response || !response.user_id) {
-        throw new Error('Invalid response from server');
+      if (!response || !response.verificationId) {
+        throw new Error('Invalid response from OTP service');
       }
       
-      // Navigate to OTP screen with mobile number
+      // Navigate to OTP screen with mobile number and verificationId
       router.push({
         pathname: '/otp-verification',
         params: { 
           mobileNumber,
           flow: 'login',
-          userId: response.user_id 
+          verificationId: response.verificationId,
         }
       });
     } catch (error: any) {
       console.error('OTP Request Error:', error);
       const errorMessage = error?.message || 'Failed to send OTP';
-      
-      if (errorMessage.toLowerCase().includes('user not found')) {
+      const lower = errorMessage.toLowerCase();
+
+      if (lower.includes('user not registered') || lower.includes('user not found')) {
         Alert.alert(
           'Account Not Found',
           'No account found with this number. Would you like to sign up?',
           [
             { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Sign Up', 
-              onPress: () => router.push('/signup') 
-            }
-          ]
+            {
+              text: 'Sign Up',
+              onPress: () => router.push('/signup'),
+            },
+          ],
         );
-      } else if (errorMessage.toLowerCase().includes('network request failed')) {
+      } else if (lower.includes('verification service is temporarily unavailable')) {
+        Alert.alert(
+          'Service unavailable',
+          'Our verification service is temporarily unavailable. Please try again in a few minutes.',
+        );
+      } else if (lower.includes('invalid request')) {
+        Alert.alert(
+          'Invalid request',
+          'The OTP request was invalid. Please check your mobile number and try again.',
+        );
+      } else if (lower.includes('network request failed') || lower.includes('network error')) {
         Alert.alert(
           'Connection Error',
-          'Unable to connect to the server. Please check your internet connection and try again.'
+          'Unable to connect to the server. Please check your internet connection and try again.',
         );
       } else {
         Alert.alert('Error', `Could not send OTP: ${errorMessage}`);
@@ -225,5 +238,18 @@ const styles = StyleSheet.create({
     color: '#7C4DFF',
     fontSize: 15,
     fontWeight: '700',
+  },
+  devButton: {
+    marginTop: 16,
+    alignSelf: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#E5E7EB',
+  },
+  devButtonText: {
+    fontSize: 13,
+    color: '#374151',
+    fontWeight: '500',
   },
 });

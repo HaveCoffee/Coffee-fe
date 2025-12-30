@@ -1,6 +1,13 @@
 import React from 'react';
-import HomeScreen from '../../screens/HomeScreen';
+import { StyleSheet, View } from 'react-native';
 
 export default function HomeTab() {
-  return <HomeScreen />;
+  return <View style={styles.container} />;
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+});

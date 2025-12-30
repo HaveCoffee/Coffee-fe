@@ -1,54 +1,41 @@
-import { router } from 'expo-router';
+// context/AuthContext.tsx
 import * as SecureStore from 'expo-secure-store';
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { authService } from '../services/authService';
-
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  mobileNumber: string;
-}
+import { AUTH_TOKEN_KEY, REFRESH_TOKEN_KEY } from '../constants/auth';
 
 interface AuthContextType {
-  user: User | null;
+  user: any | null;
   token: string | null;
   isLoading: boolean;
-  login: (token: string, userData: any) => Promise<void>;
+  login: (userData: any) => Promise<void>;
   logout: () => Promise<void>;
+  updateUser: (updates: any) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const [user, setUser] = useState<any | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const loadAuthState = async () => {
       try {
-        const storedToken = await SecureStore.getItemAsync('authToken');
+        const [userJson, storedToken] = await Promise.all([
+          SecureStore.getItemAsync('user'),
+          SecureStore.getItemAsync(AUTH_TOKEN_KEY),
+        ]);
+
+        if (userJson) {
+          setUser(JSON.parse(userJson));
+        }
+
         if (storedToken) {
           setToken(storedToken);
-          // Try to fetch user profile
-          try {
-            const userData = await authService.getProfile(storedToken);
-            setUser({
-              id: userData.user_id || userData.id || '',
-              name: userData.name || userData.full_name || 'User',
-              email: userData.email || '',
-              mobileNumber: userData.mobile_number || userData.mobileNumber || '',
-            });
-          } catch (error) {
-            console.error('Failed to fetch user profile:', error);
-            // Token might be invalid, clear it
-            await SecureStore.deleteItemAsync('authToken');
-            setToken(null);
-          }
         }
       } catch (error) {
-        console.error('Failed to load auth state', error);
+        console.error('Failed to load user data', error);
       } finally {
         setIsLoading(false);
       }
@@ -57,54 +44,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loadAuthState();
   }, []);
 
-  const login = async (newToken: string, userData: any) => {
+  const login = async (userData: any) => {
     try {
-      await SecureStore.setItemAsync('authToken', newToken);
-      setToken(newToken);
-      setUser({
-        id: userData.user_id,
-        name: userData.name || 'User',
-        email: userData.email || '',
-        mobileNumber: userData.mobile_number || '',
-      });
-      router.replace('/(tabs)');
+      await SecureStore.setItemAsync('user', JSON.stringify(userData));
+      setUser(userData);
+
+      // Also load the latest auth token from secure storage
+      try {
+        const storedToken = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+        if (storedToken) {
+          setToken(storedToken);
+        }
+      } catch (error) {
+        console.error('Failed to load auth token after login', error);
+      }
     } catch (error) {
-      console.error('Failed to save auth token', error);
+      console.error('Failed to save user data', error);
+      throw error;
     }
   };
 
   const logout = async () => {
     try {
-      // Call API logout if token exists
-      if (token) {
-        try {
-          await authService.logout(token);
-        } catch (error) {
-          console.error('API logout failed, clearing local data anyway:', error);
-        }
-      }
-      
-      // Clear the authentication token from secure storage
-      await SecureStore.deleteItemAsync('authToken');
-      await SecureStore.deleteItemAsync('refreshToken');
-      
-      // Reset all auth-related state
-      setToken(null);
+      await SecureStore.deleteItemAsync('user');
+      await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
       setUser(null);
-      
-      // Navigate to the auth screen
-      // Using replace to prevent going back to authenticated screens
-      router.replace('/(auth)');
-      
-      console.log('Successfully logged out');
+      setToken(null);
     } catch (error) {
-      console.error('Failed to log out:', error);
-      // Still clear local state even if API call fails
-      setToken(null);
-      setUser(null);
-      await SecureStore.deleteItemAsync('authToken');
-      router.replace('/(auth)');
+      console.error('Failed to clear user data', error);
+      throw error;
     }
+  };
+
+  const updateUser = (updates: any) => {
+    const updatedUser = { ...user, ...updates };
+    setUser(updatedUser);
+    SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
   };
 
   return (
@@ -115,12 +91,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         login,
         logout,
+        updateUser,
       }}
     >
       {children}
     </AuthContext.Provider>
   );
-}
+};
 
 export const useAuth = () => {
   const context = useContext(AuthContext);

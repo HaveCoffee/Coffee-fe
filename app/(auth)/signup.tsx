@@ -1,8 +1,8 @@
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import { Link, router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { Link, router } from 'expo-router';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { authService } from '../../services/authService';
 
 export default function SignUpScreen() {
@@ -28,14 +28,21 @@ export default function SignUpScreen() {
 
     try {
       setIsLoading(true);
-      await authService.signupInit(formData.mobileNumber);
+      const response = await authService.signupInit(formData.mobileNumber);
       
-      // Navigate to OTP screen with form data
+      if (!response || !response.verificationId) {
+        throw new Error('Failed to initiate OTP verification. Please try again.');
+      }
+      
+      // Navigate to OTP screen with form data and verificationId
       router.push({
         pathname: '/otp-verification',
         params: { 
-          ...formData,
-          flow: 'signup'
+          fullName: formData.fullName,
+          email: formData.email,
+          mobileNumber: formData.mobileNumber,
+          flow: 'signup',
+          verificationId: response.verificationId,
         }
       });
     } catch (error: any) {

@@ -1,24 +1,36 @@
 // In otp-verification.tsx
 import { Ionicons } from '@expo/vector-icons';
-import { Link, useLocalSearchParams } from 'expo-router';
+import { Link, router, useLocalSearchParams } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
+
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AUTH_TOKEN_KEY } from '../../constants/auth';
 import { useAuth } from '../../context/AuthContext';
 import { authService } from '../../services/authService';
+import { coffeeMlService } from '../../services/coffeeMlService';
 
 export default function OTPVerification() {
-  const { mobileNumber, flow } = useLocalSearchParams();
+  const { mobileNumber, flow, verificationId: verificationIdParam, fullName, email } = useLocalSearchParams();
   const { login } = useAuth();
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+
+  const [otp, setOtp] = useState(['', '', '', '']);
   const [isLoading, setIsLoading] = useState(false);
   const [timer, setTimer] = useState(30);
   const [canResend, setCanResend] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [verificationId, setVerificationId] = useState<string | null>(() => {
+    if (!verificationIdParam) return null;
+    return Array.isArray(verificationIdParam)
+      ? verificationIdParam[0]
+      : (verificationIdParam as string);
+  });
   const inputRefs = useRef<Array<TextInput | null>>([]);
 
   // Countdown timer for resend OTP
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval> | undefined;
     if (timer > 0) {
       interval = setInterval(() => {
         setTimer(prev => prev - 1);
@@ -26,59 +38,199 @@ export default function OTPVerification() {
     } else {
       setCanResend(true);
     }
-    return () => clearInterval(interval);
+    return () => {
+      if (interval !== undefined) {
+        clearInterval(interval);
+      }
+    };
   }, [timer]);
+
+  // Check if user profile is complete
+  const checkProfileComplete = async (): Promise<boolean> => {
+    try {
+      const profile = await coffeeMlService.getOwnProfile();
+      // Profile is complete if it has profile_data with meaningful content
+      if (!profile?.profile_data) {
+        return false;
+      }
+
+      const hasVibeSummary = !!profile.profile_data.vibe_summary;
+      const hasInterests = Array.isArray(profile.profile_data.interests) &&
+        profile.profile_data.interests.length > 0;
+
+      return hasVibeSummary || hasInterests;
+    } catch (error: any) {
+      // If profile doesn't exist or endpoint fails, assume incomplete
+      console.log('Profile check failed, assuming incomplete:', error);
+      return false;
+    }
+  };
 
   const handleVerify = async () => {
     const otpString = otp.join('');
-    if (otpString.length !== 6) {
-      Alert.alert('Error', 'Please enter a valid 6-digit OTP');
+    if (otpString.length !== 4) {
+      setErrorMessage('Please enter a valid 4-digit OTP');
       return;
     }
+
+    setErrorMessage(null);
 
     try {
       setIsLoading(true);
       let response;
-      
-      if (flow === 'signup') {
-        // For signup, we'll use a default empty password since it's required by the API
-        response = await authService.signupVerify(mobileNumber as string, otpString, '');
-      } else {
-        // For login, we can pass an empty password since we're not using it
-        response = await authService.loginVerify(mobileNumber as string, otpString, '');
+
+      if (!verificationId) {
+        throw new Error('Your verification session has expired. Please request a new OTP.');
       }
 
-      const token = response.token || response.access_token;
-      if (token) {
-        // Use AuthContext login method which handles token storage and navigation
-        await login(token, {
-          user_id: response.user_id || response.id,
-          name: response.name || response.full_name,
-          email: response.email || '',
-          mobile_number: mobileNumber,
-        });
+      if (!mobileNumber) {
+        throw new Error('Missing mobile number. Please go back and start again.');
+      }
+
+      if (flow === 'signup') {
+        response = await authService.signupVerify(mobileNumber as string, verificationId, otpString);
       } else {
+        response = await authService.loginVerify(mobileNumber as string, verificationId, otpString);
+      }
+
+      const token = response.token;
+
+      if (token) {
+        // Token is already stored by authService, but keep this for backward compatibility
+        await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+      } else if (flow === 'signup') {
+        // Signup verify may not return a token - user needs to login
+        // But according to API flow, we should have token. Try to proceed anyway.
+        console.warn('[AUTH] No token returned from signup verify - proceeding anyway');
+      } else {
+        // Login must return a token
         throw new Error('No token received from server');
       }
+
+      // Update user context based on backend response and navigation params
+      const userPayload = {
+        user_id: (response.user_id || response.id || mobileNumber) as string,
+        name: (response.name || response.full_name || fullName || '') as string,
+        email: (response.email || email || '') as string,
+        mobile_number: (response.mobile_number || mobileNumber) as string,
+      };
+
+      await login(userPayload);
+
+      // Check if profile is complete (only if we have a token)
+      if (token) {
+        try {
+          const isProfileComplete = await checkProfileComplete();
+
+          // Navigate based on profile completion status
+          if (isProfileComplete) {
+            router.replace('/(tabs)');
+          } else {
+            // Navigate to onboarding chat for new users or users with incomplete profiles
+            router.replace('/ella-chat?onboarding=true');
+          }
+        } catch (error) {
+          // If profile check fails, assume incomplete and go to onboarding
+          console.error('Profile check failed, proceeding to onboarding:', error);
+          router.replace('/ella-chat?onboarding=true');
+        }
+      } else {
+        // No token - go to onboarding (will handle auth errors there)
+        router.replace('/ella-chat?onboarding=true');
+      }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Verification failed');
+      const errorMsg = error.message || 'Verification failed';
+      setErrorMessage(errorMsg);
+
+      const lower = errorMsg.toLowerCase();
+
+      // Align with VerifyNow-mapped messages while keeping backwards compatibility
+      if (
+        lower.includes('invalid or incorrect otp') ||
+        lower.includes('invalid or expired otp') ||
+        lower.includes('otp has expired')
+      ) {
+        Alert.alert(
+          'Invalid OTP',
+          'The OTP you entered is incorrect or has expired. Please try again or request a new one.',
+          [
+            { text: 'OK' },
+            {
+              text: 'Resend OTP',
+              onPress: handleResendOTP,
+            },
+          ],
+        );
+      } else if (lower.includes('verification service is temporarily unavailable')) {
+        Alert.alert(
+          'Service unavailable',
+          'Our verification service is temporarily unavailable. Please try again in a few minutes.',
+        );
+      } else if (lower.includes('invalid request')) {
+        Alert.alert(
+          'Invalid request',
+          'Something was wrong with the verification request. Please go back and try again.',
+        );
+      } else if (lower.includes('invalid password')) {
+        // After an invalid password, backend expires the OTP; user must request a new one
+        Alert.alert(
+          'Invalid password',
+          'The password you entered is incorrect. Please request a new OTP and try again.',
+          [
+            { text: 'OK' },
+            {
+              text: 'Resend OTP',
+              onPress: handleResendOTP,
+            },
+          ],
+        );
+      } else if (lower.includes('login failed')) {
+        // Legacy Twilio-style error when verification session is no longer valid
+        Alert.alert(
+          'Login session expired',
+          'Your login session has expired. Please request a new OTP to continue.',
+          [
+            { text: 'OK' },
+            {
+              text: 'Resend OTP',
+              onPress: handleResendOTP,
+            },
+          ],
+        );
+      } else {
+        Alert.alert('Error', errorMsg);
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleResendOTP = async () => {
-    if (!canResend) return;
+    if (!canResend && timer > 0) return;
 
     try {
       setIsLoading(true);
-      if (flow === 'signup') {
-        await authService.signupInit(mobileNumber as string);
-      } else {
-        await authService.loginInit(mobileNumber as string);
+      setErrorMessage(null);
+      if (!mobileNumber) {
+        throw new Error('Missing mobile number. Please go back and start again.');
       }
+
+      let response;
+      if (flow === 'signup') {
+        response = await authService.signupInit(mobileNumber as string);
+      } else {
+        response = await authService.loginInit(mobileNumber as string);
+      }
+
+      if (!response || !response.verificationId) {
+        throw new Error('Failed to resend OTP. Please try again.');
+      }
+
+      setVerificationId(response.verificationId);
       setTimer(30);
       setCanResend(false);
+setOtp(['', '', '', '']); // Clear OTP inputs
+      inputRefs.current[0]?.focus(); // Focus first input
       Alert.alert('Success', 'OTP has been resent');
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to resend OTP');
@@ -109,7 +261,11 @@ export default function OTPVerification() {
       <View style={styles.decorTop} />
       <View style={styles.decorBottom} />
 
-      <View style={styles.content}>
+      <ScrollView 
+        style={styles.content}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.logoWrap}>
           <View style={styles.logoCircle}>
             <Ionicons name="cafe" size={36} color="#fff" />
@@ -121,10 +277,12 @@ export default function OTPVerification() {
           <Text style={styles.subtitle}>We sent a 6-digit code to {mobileNumber}</Text>
 
           <View style={styles.otpContainer}>
-            {[...Array(6)].map((_, index) => (
+            {[...Array(4)].map((_, index) => (
               <TextInput
                 key={index}
-                ref={(ref) => (inputRefs.current[index] = ref)}
+                ref={(ref) => {
+                  inputRefs.current[index] = ref;
+                }}
                 style={styles.otpInput}
                 keyboardType="number-pad"
                 maxLength={1}
@@ -136,20 +294,26 @@ export default function OTPVerification() {
             ))}
           </View>
 
+          {errorMessage && (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{errorMessage}</Text>
+            </View>
+          )}
+
           <TouchableOpacity
             style={[styles.verifyButton, isLoading && styles.buttonDisabled]}
             onPress={handleVerify}
             disabled={isLoading}
             activeOpacity={0.9}
           >
-            {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.verifyButtonText}>Verify OTP</Text>}
+            {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.verifyButtonText}>Verify</Text>}
           </TouchableOpacity>
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Didn't receive code?</Text>
-            <TouchableOpacity onPress={handleResendOTP} disabled={!canResend}>
-              <Text style={[styles.resendText, !canResend && styles.resendTextDisabled]}>
-                {canResend ? ' Resend' : ` Resend in ${timer}s`}
+            <TouchableOpacity onPress={handleResendOTP} disabled={!canResend && timer > 0}>
+              <Text style={[styles.resendText, (!canResend && timer > 0) && styles.resendTextDisabled]}>
+                {canResend || timer === 0 ? ' Resend' : ` Resend in ${timer}s`}
               </Text>
             </TouchableOpacity>
           </View>
@@ -164,7 +328,7 @@ export default function OTPVerification() {
             </Link>
           </View>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -196,8 +360,11 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  scrollContent: {
     padding: 20,
     justifyContent: 'center',
+    flexGrow: 1,
   },
   logoWrap: {
     alignItems: 'center',
@@ -243,6 +410,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 30,
+  },
+  errorContainer: {
+    backgroundColor: '#fee',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 15,
+  },
+  errorText: {
+    color: '#c33',
+    fontSize: 14,
+    textAlign: 'center',
   },
   otpInput: {
     width: 45,

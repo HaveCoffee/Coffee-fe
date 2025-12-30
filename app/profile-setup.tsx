@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,17 +17,16 @@ import Avatar from '../components/Avatar';
 import { useAuth } from '../context/AuthContext';
 import { authService } from '../services/authService';
 
-export default function ProfileScreen() {
-  const router = useRouter();
+export default function ProfileSetupScreen() {
   const { user, updateUser } = useAuth();
 
-  const [isOpenToMeet, setIsOpenToMeet] = useState<boolean>(user?.isOpenToMeet ?? true);
-  const [website, setWebsite] = useState(user?.website ?? '');
-  const [pronouns, setPronouns] = useState(user?.pronouns ?? '');
-  const [aboutText, setAboutText] = useState(user?.about ?? '');
   const [fullName, setFullName] = useState(user?.name ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
-  const [isSaving, setIsSaving] = useState(false);
+  const [about, setAbout] = useState(user?.about ?? '');
+  const [pronouns, setPronouns] = useState(user?.pronouns ?? '');
+  const [website, setWebsite] = useState(user?.website ?? '');
+  const [username, setUsername] = useState(user?.username ?? user?.email ?? '');
+  const [isOpenToMeet, setIsOpenToMeet] = useState<boolean>(user?.isOpenToMeet ?? true);
 
   const [demographics, setDemographics] = useState<string[]>(user?.demographics ?? []);
   const [traits, setTraits] = useState<string[]>(user?.traits ?? []);
@@ -39,31 +38,21 @@ export default function ProfileScreen() {
   const [conversationTopicsInput, setConversationTopicsInput] = useState('');
   const [coffeePreferencesInput, setCoffeePreferencesInput] = useState('');
 
-  const username = user?.username || user?.email || 'you';
-
-  useEffect(() => {
-    if (user) {
-      setFullName(user.name || '');
-      setEmail(user.email || '');
-      setAboutText(user.about || '');
-      setPronouns(user.pronouns || '');
-      setWebsite(user.website || '');
-      setIsOpenToMeet(user.isOpenToMeet ?? true);
-      setDemographics(user.demographics ?? []);
-      setTraits(user.traits ?? []);
-      setConversationTopics(user.conversationTopics ?? []);
-      setCoffeePreferences(user.coffeePreferences ?? []);
-    }
-  }, []);
+  const [isSaving, setIsSaving] = useState(false);
 
   const handleSave = async () => {
+    if (!fullName.trim()) {
+      Alert.alert('Missing info', 'Please add your name to continue.');
+      return;
+    }
+
     try {
       setIsSaving(true);
 
       const payload = {
         name: fullName.trim(),
         email: email.trim(),
-        about: aboutText.trim(),
+        about: about.trim(),
         pronouns: pronouns.trim(),
         website: website.trim(),
         isOpenToMeet,
@@ -71,14 +60,33 @@ export default function ProfileScreen() {
         traits,
         conversationTopics,
         coffeePreferences,
+        username: username.trim(),
       };
 
       const updated = await authService.updateProfile(payload);
       updateUser({ ...payload, ...updated });
-
-      Alert.alert('Saved', 'Your profile has been updated.');
+      router.replace('/(tabs)');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to update profile');
+      updateUser({
+        name: fullName.trim(),
+        email: email.trim(),
+        about: about.trim(),
+        pronouns: pronouns.trim(),
+        website: website.trim(),
+        isOpenToMeet,
+        demographics,
+        traits,
+        conversationTopics,
+        coffeePreferences,
+        username: username.trim(),
+      });
+
+      Alert.alert(
+        'Saved locally',
+        (error?.message || 'Could not sync with server.') +
+          '\nYour profile is saved on this device.'
+      );
+      router.replace('/(tabs)');
     } finally {
       setIsSaving(false);
     }
@@ -98,7 +106,6 @@ export default function ProfileScreen() {
           placeholder={placeholder}
           value={value}
           onChangeText={setValue}
-          placeholderTextColor="#999"
         />
         <TouchableOpacity
           style={styles.inlineAddBtn}
@@ -114,7 +121,7 @@ export default function ProfileScreen() {
       </View>
 
       {items.length > 0 && (
-        <View style={styles.tagsContainer}>
+        <View style={styles.tagsRow}>
           {items.map((item, idx) => (
             <View key={`${item}-${idx}`} style={styles.tag}>
               <Text style={styles.tagText}>{item}</Text>
@@ -127,42 +134,32 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Edit Profile</Text>
-        <TouchableOpacity onPress={handleSave} disabled={isSaving}>
-          {isSaving ? (
-            <ActivityIndicator size="small" color="#7C4DFF" />
-          ) : (
-            <Text style={styles.doneButton}>Save</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Profile */}
-        <View style={styles.profileSection}>
-          <Avatar size={92} />
-          <Text style={styles.greeting}>{fullName ? `Hello, ${fullName}!` : 'Hello!'}</Text>
-          <TouchableOpacity>
-            <Text style={styles.editPhotoText}>Edit Photo</Text>
-          </TouchableOpacity>
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Set up your profile</Text>
         </View>
 
-        {/* Basic Info */}
-        <View style={styles.section}>
+        <View style={styles.profileSection}>
+          <Avatar size={92} />
+          <Text style={styles.greeting}>
+            Welcome{user?.name ? `, ${user.name}` : ''}!
+          </Text>
+          <Text style={styles.subtitle}>
+            A few details help us personalise your conversations.
+          </Text>
+        </View>
+
+        <View style={styles.card}>
           <Text style={styles.sectionTitle}>Basic Info</Text>
-          <Text style={styles.fieldLabel}>Full Name</Text>
+
+          <Text style={styles.label}>Full Name</Text>
           <TextInput style={styles.input} value={fullName} onChangeText={setFullName} />
 
-          <Text style={[styles.fieldLabel, styles.fieldSpacing]}>Email</Text>
+          <Text style={[styles.label, styles.mt]}>Email</Text>
           <TextInput style={styles.input} value={email} onChangeText={setEmail} />
         </View>
 
-        <View style={styles.section}>
+        <View style={styles.card}>
           <Text style={styles.sectionTitle}>Here's what we know about you</Text>
           {renderTagInput(
             demographicsInput,
@@ -173,23 +170,23 @@ export default function ProfileScreen() {
           )}
         </View>
 
-        <View style={styles.section}>
+        <View style={styles.card}>
           <Text style={styles.sectionTitle}>About You</Text>
           <TextInput
-            style={[styles.input, styles.aboutInput]}
+            style={[styles.input, styles.multiline]}
+            value={about}
+            onChangeText={setAbout}
             multiline
-            value={aboutText}
-            onChangeText={setAboutText}
           />
         </View>
 
-        <View style={styles.section}>
+        <View style={styles.card}>
           <Text style={styles.sectionTitle}>Your Traits</Text>
           {renderTagInput(traitsInput, setTraitsInput, traits, setTraits, 'Add trait')}
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>A perfect conversation is about</Text>
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Conversation Topics</Text>
           {renderTagInput(
             conversationTopicsInput,
             setConversationTopicsInput,
@@ -199,8 +196,8 @@ export default function ProfileScreen() {
           )}
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>A perfect coffee is with</Text>
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Coffee Preferences</Text>
           {renderTagInput(
             coffeePreferencesInput,
             setCoffeePreferencesInput,
@@ -210,33 +207,49 @@ export default function ProfileScreen() {
           )}
         </View>
 
-        <View style={styles.section}>
-          <View style={styles.switchRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sectionTitle}>Open to Meet</Text>
-              <Text style={styles.sectionDescription}>
-                Let others know if you're open to meeting.
-              </Text>
-            </View>
-            <Switch value={isOpenToMeet} onValueChange={setIsOpenToMeet} />
+        <View style={styles.cardRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sectionTitle}>Open to Meet</Text>
+            <Text style={styles.subText}>
+              Let others know if you're open to meeting.
+            </Text>
           </View>
+          <Switch value={isOpenToMeet} onValueChange={setIsOpenToMeet} />
         </View>
 
-        <View style={styles.section}>
+        <View style={styles.card}>
           <Text style={styles.sectionTitle}>Website</Text>
           <TextInput style={styles.input} value={website} onChangeText={setWebsite} />
         </View>
 
-        <View style={styles.section}>
+        <View style={styles.card}>
           <Text style={styles.sectionTitle}>Pronouns</Text>
           <TextInput style={styles.input} value={pronouns} onChangeText={setPronouns} />
         </View>
 
-        <View style={styles.section}>
+        <View style={styles.card}>
           <Text style={styles.sectionTitle}>Username</Text>
-          <Text style={styles.usernameText}>{username}</Text>
+          <TextInput style={styles.input} value={username} onChangeText={setUsername} />
         </View>
       </ScrollView>
+
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={[styles.primaryButton, isSaving && styles.disabled]}
+          onPress={handleSave}
+          disabled={isSaving}
+        >
+          {isSaving ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.primaryButtonText}>Save & Continue</Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => router.replace('/(tabs)')} disabled={isSaving}>
+          <Text style={styles.secondaryText}>Skip for now</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
@@ -246,87 +259,58 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
 
-  header: {
+  scrollContent: { padding: 16, paddingBottom: 140 },
+
+  header: { alignItems: 'center', marginBottom: 12 },
+  headerTitle: { fontSize: 20, fontWeight: '700' },
+
+  profileSection: { alignItems: 'center', marginBottom: 20 },
+  greeting: { marginTop: 12, fontSize: 18, fontWeight: '600' },
+  subtitle: { marginTop: 6, fontSize: 13, color: '#666', textAlign: 'center' },
+
+  card: {
+    backgroundColor: '#FFF',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+  },
+  cardRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 17,
-    fontWeight: '600',
-  },
-  doneButton: {
-    color: '#7C4DFF',
-    fontWeight: '600',
+    backgroundColor: '#FFF',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
   },
 
-  scrollContent: {
-    paddingBottom: 24,
-  },
+  sectionTitle: { fontSize: 15, fontWeight: '600', marginBottom: 8 },
+  subText: { fontSize: 13, color: '#777' },
 
-  profileSection: {
-    alignItems: 'center',
-    paddingVertical: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
-  },
-  greeting: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginTop: 8,
-  },
-  editPhotoText: {
-    marginTop: 6,
-    fontSize: 14,
-    color: '#7C4DFF',
-  },
-
-  section: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  sectionDescription: {
-    fontSize: 13,
-    color: '#666',
-  },
-
-  fieldLabel: {
-    fontSize: 13,
-    color: '#555',
-    marginBottom: 4,
-  },
-  fieldSpacing: {
-    marginTop: 10,
-  },
+  label: { fontSize: 13, color: '#555', marginBottom: 4 },
+  mt: { marginTop: 10 },
 
   input: {
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#E5E6EA',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 14,
+    backgroundColor: '#F8F8FA',
   },
   inputFlex: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#E5E6EA',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 14,
+    backgroundColor: '#F8F8FA',
+  },
+  multiline: {
+    minHeight: 72,
+    textAlignVertical: 'top',
   },
 
   inputRow: {
@@ -343,7 +327,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  tagsContainer: {
+  tagsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     marginTop: 6,
@@ -356,23 +340,32 @@ const styles = StyleSheet.create({
     marginRight: 6,
     marginBottom: 6,
   },
-  tagText: {
-    fontSize: 13,
-  },
+  tagText: { fontSize: 13 },
 
-  aboutInput: {
-    minHeight: 72,
-    textAlignVertical: 'top',
+  footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    padding: 16,
+    backgroundColor: '#FFF',
+    borderTopWidth: 1,
+    borderTopColor: '#EEE',
   },
-
-  switchRow: {
-    flexDirection: 'row',
+  primaryButton: {
+    backgroundColor: '#7C4DFF',
+    height: 52,
+    borderRadius: 14,
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
   },
-
-  usernameText: {
+  primaryButtonText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  secondaryText: {
+    marginTop: 10,
+    textAlign: 'center',
+    color: '#7C4DFF',
     fontSize: 14,
-    color: '#333',
+    fontWeight: '600',
   },
+  disabled: { opacity: 0.7 },
 });

@@ -1,16 +1,15 @@
 // services/chatService.ts
-import { apiRequest, CHAT_API_BASE_URL } from '../utils/api';
-import { getAuthToken } from './authService';
-
-export type MessageType = 'text' | 'options' | 'match' | 'voice';
+import * as SecureStore from 'expo-secure-store';
+import { chatApi } from '../utils/api';
 
 export interface Message {
   id: string;
-  type: MessageType;
-  content: string | OptionButton[] | MatchCard;
+  type: 'text' | 'options' | 'action' | 'match';
+  content: string | any;
   sender: 'user' | 'bot';
   time: string;
   status?: 'sending' | 'sent' | 'failed';
+  threadId?: string;
 }
 
 export interface OptionButton {
@@ -21,156 +20,190 @@ export interface OptionButton {
 }
 
 export interface MatchCard {
-  id: string;
   name: string;
-  profilePicture?: string;
-  matchPercentage: number;
   availability: string;
+  matchPercentage: number;
   description: string;
   sharedInterests: string[];
-  conversationStarter: string;
+  conversationStarter?: string;
 }
 
+const THREAD_ID_STORAGE_KEY = 'chat_thread_id';
+const USE_CHAT_MOCK = false;
+
+let mockChatHistory: Message[] = [
+  {
+    id: 'welcome',
+    type: 'text',
+    content:
+      "Hi! I'm Ella, your AI assistant. This is mock data so you can preview the chat UI.",
+    sender: 'bot',
+    time: new Date().toISOString(),
+    status: 'sent',
+  },
+];
+
 export const chatService = {
-  async getChatHistory(): Promise<Message[]> {
-    try {
-      const token = await getAuthToken();
-      const response = await apiRequest('/chat/history', 'GET', null, token, CHAT_API_BASE_URL);
-      
-      // Transform API response to Message format
-      return response.messages?.map((msg: any) => ({
-        id: msg.id || `msg-${Date.now()}-${Math.random()}`,
-        type: msg.type || 'text',
-        content: msg.content || msg.text || msg.message || '',
-        sender: msg.sender || 'bot',
-        time: msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  async startOnboarding(): Promise<Message> {
+    if (USE_CHAT_MOCK) {
+      const message: Message = {
+        id: Date.now().toString(),
+        type: 'text',
+        content: "Hi! I'm Ella, your AI assistant. This is mock data so you can preview the chat UI.",
+        sender: 'bot',
+        time: new Date().toISOString(),
         status: 'sent',
-      })) || [];
+      };
+
+      mockChatHistory = [...mockChatHistory, message];
+
+      try {
+        await SecureStore.setItemAsync(THREAD_ID_STORAGE_KEY, 'mock-thread');
+      } catch (err) {
+        console.warn('Failed to save mock thread ID:', err);
+      }
+
+      return message;
+    }
+
+    try {
+      const response = await chatApi.sendMessage(
+        'START_ONBOARDING',
+        undefined,
+        { is_onboarding: true }
+      );
+
+      return {
+        id: Date.now().toString(),
+        type: 'text',
+        content: response.response,
+        sender: 'bot',
+        time: new Date().toISOString(),
+        threadId: response.thread_id,
+      };
     } catch (error) {
-      console.error('Error fetching chat history:', error);
-      return [];
+      console.error('Error starting onboarding:', error);
+      throw new Error('Failed to start onboarding. Please try again.');
     }
   },
 
-  async sendMessage(message: string): Promise<Message> {
-    try {
-      const token = await getAuthToken();
-      const response = await apiRequest('/chat/send', 'POST', { 
-        message,
-        timestamp: new Date().toISOString(),
-      }, token, CHAT_API_BASE_URL);
-      
-      return {
-        id: response.id || `msg-${Date.now()}`,
-        type: response.type || 'text',
-        content: this.parseMessageContent(response),
-        sender: 'bot',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  async sendMessage(
+    message: string, 
+    threadId?: string
+  ): Promise<Message> {
+    if (USE_CHAT_MOCK) {
+      const userMessage: Message = {
+        id: `user-${Date.now()}`,
+        type: 'text',
+        content: message,
+        sender: 'user',
+        time: new Date().toISOString(),
         status: 'sent',
       };
+
+      const botMessage: Message = {
+        id: `bot-${Date.now()}`,
+        type: 'text',
+        content: "Ella (mock): That sounds interesting! Tell me a bit more.",
+        sender: 'bot',
+        time: new Date().toISOString(),
+        status: 'sent',
+      };
+
+      mockChatHistory = [...mockChatHistory, userMessage, botMessage];
+
+      try {
+        await SecureStore.setItemAsync(THREAD_ID_STORAGE_KEY, 'mock-thread');
+      } catch (err) {
+        console.warn('Failed to save mock thread ID:', err);
+      }
+
+      return botMessage;
+    }
+
+    try {
+      const result = await chatApi.sendMessage(message, threadId);
+
+      const botMessage: Message = {
+        id: Date.now().toString(),
+        type: 'text',
+        content: result.response,
+        sender: 'bot',
+        time: new Date().toISOString(),
+        status: 'sent',
+        threadId: result.thread_id,
+      };
+
+      try {
+        if (result.thread_id) {
+          await SecureStore.setItemAsync(THREAD_ID_STORAGE_KEY, result.thread_id);
+        }
+      } catch (err) {
+        console.warn('Failed to save thread ID:', err);
+      }
+
+      mockChatHistory = [...mockChatHistory, botMessage];
+
+      return botMessage;
     } catch (error) {
       console.error('Error sending message:', error);
-      throw error;
+      throw new Error('Failed to send message. Please try again.');
     }
   },
 
-  async sendOptionSelection(optionId: string, optionValue: string): Promise<Message> {
+  async getChatHistory(): Promise<Message[]> {
+    if (USE_CHAT_MOCK) {
+      return mockChatHistory;
+    }
+    return [];
+  },
+
+  async sendOptionSelection(id: string, value: string): Promise<Message> {
+    // For now we keep this entirely on the frontend and do not hit the backend.
+    const botMessage: Message = {
+      id: `bot-opt-${Date.now()}`,
+      type: 'text',
+      content: `Ella (mock): Thanks for choosing "${value}". Tell me a bit more about that.`,
+      sender: 'bot',
+      time: new Date().toISOString(),
+      status: 'sent',
+    };
+
+    mockChatHistory = [...mockChatHistory, botMessage];
+    return botMessage;
+  },
+
+  async sendVoiceMessage(fileUri: string): Promise<Message> {
+    // Simple stub that treats voice messages like a normal message reply.
+    const botMessage: Message = {
+      id: `bot-voice-${Date.now()}`,
+      type: 'text',
+      content: 'Ella (mock): I received your voice note!',
+      sender: 'bot',
+      time: new Date().toISOString(),
+      status: 'sent',
+    };
+
+    mockChatHistory = [...mockChatHistory, botMessage];
+    return botMessage;
+  },
+
+  async saveThreadId(threadId: string | null) {
     try {
-      const token = await getAuthToken();
-      const response = await apiRequest('/chat/option', 'POST', {
-        optionId,
-        value: optionValue,
-        timestamp: new Date().toISOString(),
-      }, token, CHAT_API_BASE_URL);
-      
-      return {
-        id: response.id || `msg-${Date.now()}`,
-        type: response.type || 'text',
-        content: this.parseMessageContent(response),
-        sender: 'bot',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'sent',
-      };
-    } catch (error) {
-      console.error('Error sending option selection:', error);
-      throw error;
+      if (threadId) {
+        await SecureStore.setItemAsync(THREAD_ID_STORAGE_KEY, threadId);
+      }
+    } catch (err) {
+      console.warn('Failed to save thread ID:', err);
     }
   },
 
-  async sendVoiceMessage(audioUri: string): Promise<Message> {
+  async getThreadId(): Promise<string | null> {
     try {
-      const token = await getAuthToken();
-      
-      // Create FormData for file upload
-      const formData = new FormData();
-      formData.append('audio', {
-        uri: audioUri,
-        type: 'audio/m4a',
-        name: 'voice-message.m4a',
-      } as any);
-      formData.append('timestamp', new Date().toISOString());
-      
-      const response = await fetch(`${CHAT_API_BASE_URL}/chat/voice`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
-        body: formData,
-      });
-      
-      const responseData = await response.json();
-      
-      return {
-        id: responseData.id || `msg-${Date.now()}`,
-        type: responseData.type || 'text',
-        content: this.parseMessageContent(responseData),
-        sender: 'bot',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'sent',
-      };
-    } catch (error) {
-      console.error('Error sending voice message:', error);
-      throw error;
+      return await SecureStore.getItemAsync(THREAD_ID_STORAGE_KEY);
+    } catch (err) {
+      console.warn('Error reading thread ID:', err);
+      return null;
     }
-  },
-
-  parseMessageContent(response: any): string | OptionButton[] | MatchCard {
-    // Handle different response types
-    if (response.type === 'options' && response.options) {
-      return response.options.map((opt: any, index: number) => ({
-        id: opt.id || `opt-${index}`,
-        label: opt.label || opt.text,
-        icon: opt.icon || this.getIconForLabel(opt.label || opt.text),
-        value: opt.value || opt.label || opt.text,
-      }));
-    }
-    
-    if (response.type === 'match' && response.match) {
-      return {
-        id: response.match.id || `match-${Date.now()}`,
-        name: response.match.name,
-        profilePicture: response.match.profilePicture,
-        matchPercentage: response.match.matchPercentage || response.match.matchScore || 0,
-        availability: response.match.availability || 'Available soon',
-        description: response.match.description || '',
-        sharedInterests: response.match.sharedInterests || response.match.interests || [],
-        conversationStarter: response.match.conversationStarter || response.match.starter || '',
-      };
-    }
-    
-    return response.content || response.text || response.message || '';
-  },
-
-  getIconForLabel(label: string): string {
-    const lowerLabel = label.toLowerCase();
-    if (lowerLabel.includes('movie') || lowerLabel.includes('film')) return 'film';
-    if (lowerLabel.includes('book')) return 'book';
-    if (lowerLabel.includes('sport')) return 'basketball';
-    if (lowerLabel.includes('travel')) return 'airplane';
-    if (lowerLabel.includes('music')) return 'musical-notes';
-    if (lowerLabel.includes('food')) return 'restaurant';
-    if (lowerLabel.includes('tech')) return 'laptop';
-    return 'ellipse';
   },
 };
