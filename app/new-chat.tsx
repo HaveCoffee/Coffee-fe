@@ -43,8 +43,10 @@ export default function NewChatScreen() {
 
     try {
       setCreatingFor(match.user_id);
-      const conversation = await conversationService.createConversation(match.user_id);
-      router.push(`/(chat)/${conversation.id}` as any);
+      // Use Coffee-ML start-chat API
+      await coffeeMlService.startChat(match.user_id);
+      // Navigate to chat with this user
+      router.push(`/(chat)/${match.user_id}` as any);
     } catch (error: any) {
       console.error('Error starting conversation:', error);
       Alert.alert('Error', error.message || 'Failed to start conversation.');

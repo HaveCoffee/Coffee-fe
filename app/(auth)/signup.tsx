@@ -34,7 +34,6 @@ export default function SignUpScreen() {
         throw new Error('Failed to initiate OTP verification. Please try again.');
       }
       
-      // Navigate to OTP screen with form data and verificationId
       router.push({
         pathname: '/otp-verification',
         params: { 
@@ -58,41 +57,44 @@ export default function SignUpScreen() {
     }
   };
 
+  const isFormValid = formData.mobileNumber.length === 10;
+
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
+      <View style={styles.header}>
         <Text style={styles.title}>Create Account</Text>
+      </View>
 
-        <View style={styles.heroIcon}>
-          <View style={styles.iconCircle}>
-            <Ionicons name="person-add" size={42} color="#fff" />
-          </View>
+      <View style={styles.content}>
+        <View style={styles.iconCircle}>
+          <Ionicons name="person-add" size={48} color="#FFFFFF" />
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.label}>Full Name</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Full Name"
-            value={formData.fullName}
-            onChangeText={(text) => handleInputChange('fullName', text)}
-            placeholderTextColor="#9A9A9A"
-            editable={!isLoading}
-          />
+        <View style={styles.inputContainer}>
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={styles.input}
+              placeholder="Full Name"
+              value={formData.fullName}
+              onChangeText={(text) => handleInputChange('fullName', text)}
+              placeholderTextColor="#9CA3AF"
+              editable={!isLoading}
+            />
+          </View>
 
-          <Text style={[styles.label, styles.labelSpacing]}>Email</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            keyboardType="email-address"
-            value={formData.email}
-            onChangeText={(text) => handleInputChange('email', text)}
-            placeholderTextColor="#9A9A9A"
-            editable={!isLoading}
-            autoCapitalize="none"
-          />
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={styles.input}
+              placeholder="Email"
+              keyboardType="email-address"
+              value={formData.email}
+              onChangeText={(text) => handleInputChange('email', text)}
+              placeholderTextColor="#9CA3AF"
+              editable={!isLoading}
+              autoCapitalize="none"
+            />
+          </View>
 
-          <Text style={[styles.label, styles.labelSpacing]}>Mobile Number</Text>
           <View style={styles.phoneInput}>
             <Text style={styles.countryCode}>+91</Text>
             <TextInput
@@ -102,28 +104,29 @@ export default function SignUpScreen() {
               value={formData.mobileNumber}
               onChangeText={(text) => handleInputChange('mobileNumber', text.replace(/[^0-9]/g, ''))}
               maxLength={10}
-              placeholderTextColor="#9A9A9A"
+              placeholderTextColor="#9CA3AF"
               editable={!isLoading}
             />
           </View>
-
-          <TouchableOpacity
-            style={[styles.button, isLoading && styles.buttonDisabled]}
-            onPress={handleSignUp}
-            disabled={isLoading}
-            activeOpacity={0.9}
-          >
-            {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign Up</Text>}
-          </TouchableOpacity>
         </View>
 
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>Already have an account?</Text>
-          <Link href="/login" style={styles.link}>
-            {' '}
-            Sign In
-          </Link>
-        </View>
+        <TouchableOpacity
+          style={[styles.button, !isFormValid && styles.buttonDisabled]}
+          onPress={handleSignUp}
+          disabled={isLoading || !isFormValid}
+          activeOpacity={0.8}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.buttonText}>Sign Up</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.footer}>
+        <Text style={styles.footerText}>Already have an account?</Text>
+        <Link href="/login" style={styles.link}>Sign In</Link>
       </View>
     </SafeAreaView>
   );
@@ -134,120 +137,107 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  content: {
-    flex: 1,
-    paddingHorizontal: 22,
-    justifyContent: 'center',
+  header: {
+    paddingTop: 20,
+    paddingBottom: 20,
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
   },
   title: {
-    fontSize: 28,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginBottom: 32,
-    color: '#1E1E1E',
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1F2937',
   },
-  heroIcon: {
-    alignItems: 'center',
-    marginBottom: 28,
+  content: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 48,
   },
   iconCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: '#7C4DFF',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#9D85FF',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#7C4DFF',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 6,
+    alignSelf: 'center',
+    marginBottom: 48,
   },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 18,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    elevation: 4,
+  inputContainer: {
+    marginBottom: 16,
   },
-  label: {
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 8,
-    color: '#2E2E2E',
-  },
-  labelSpacing: {
-    marginTop: 14,
+  inputWrapper: {
+    marginBottom: 12,
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#E5E6EA',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    fontSize: 16,
-    color: '#1E1E1E',
-    height: 52,
-    backgroundColor: '#F5F5F8',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    height: 56,
+    borderWidth: 2,
+    borderColor: 'rgba(86, 93, 109, 0.2)',
+    fontSize: 18,
+    fontWeight: '400',
+    color: '#565D6D',
   },
   phoneInput: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E6EA',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    height: 52,
-    backgroundColor: '#F5F5F8',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    height: 56,
+    borderWidth: 2,
+    borderColor: 'rgba(86, 93, 109, 0.2)',
   },
   countryCode: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1E1E1E',
-    marginRight: 10,
+    fontSize: 18,
+    fontWeight: '400',
+    color: '#565D6D',
+    marginRight: 8,
   },
   phoneInputField: {
     flex: 1,
     height: '100%',
-    fontSize: 16,
-    color: '#1E1E1E',
+    fontSize: 18,
+    fontWeight: '400',
+    color: '#565D6D',
   },
   button: {
-    marginTop: 18,
-    backgroundColor: '#7C4DFF',
-    borderRadius: 14,
+    backgroundColor: '#9D85FF',
+    borderRadius: 16,
     height: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#7C4DFF',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 5,
+    shadowColor: '#171a1f',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
   },
   buttonDisabled: {
-    backgroundColor: '#B8A5FF',
-    shadowOpacity: 0.1,
+    opacity: 0.5,
   },
   buttonText: {
     color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '600',
+    lineHeight: 28,
   },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 24,
+    alignItems: 'center',
+    paddingBottom: 40,
   },
   footerText: {
-    color: '#6C6C6C',
-    fontSize: 15,
+    color: '#6B7280',
+    fontSize: 16,
   },
   link: {
-    color: '#7C4DFF',
-    fontSize: 15,
-    fontWeight: '700',
+    color: '#9D85FF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Avatar from '../components/Avatar';
 import { coffeeMlService, Match } from '../services/coffeeMlService';
 
@@ -31,8 +32,27 @@ export default function DiscoverScreen() {
 
   const renderMatch = ({ item }: { item: Match }) => {
     const profile = item.profile_data || {};
-    const name: string = profile.name || item.user_id;
-    const availability: string = profile.availability || 'Available this week';
+    // Extract name using the helper function from coffeeMlService
+    const name: string = profile.name || 
+                        profile.display_name || 
+                        profile.username ||
+                        // Extract from vibe_summary if available
+                        (profile.vibe_summary ? 
+                          (() => {
+                            const vibeText = profile.vibe_summary;
+                            const iAmMatch = vibeText.match(/I am ([A-Z][a-z]+)/i);
+                            if (iAmMatch) return iAmMatch[1];
+                            const nameMatch = vibeText.match(/(?:my name is|i'm|i am) ([A-Z][a-z]+)/i);
+                            if (nameMatch) return nameMatch[1];
+                            const firstWordMatch = vibeText.match(/^([A-Z][a-z]+)(?:\s|,|\.|!)/);
+                            if (firstWordMatch && firstWordMatch[1].length > 2) return firstWordMatch[1];
+                            return null;
+                          })()
+                        : null) ||
+                        `User ${item.user_id.substring(0, 6)}`;
+    const availability: string = typeof profile.availability === 'string' 
+      ? profile.availability 
+      : profile.availability?.days?.join(', ') || 'Available this week';
     const matchPercentage = Math.round(item.score * 100);
     const sharedInterests: string[] = Array.isArray(profile.interests)
       ? profile.interests.slice(0, 3)
@@ -49,15 +69,18 @@ const handlePress = () => {
   });
 };
 
-    const handleSayHello = () => {
-  router.push({
-    pathname: '/(chat)/new',
-    params: { 
-      userId: item.user_id,
-      name: name,
-      avatar: profile.avatar
-    }
-  });
+const handleSayHello = async () => {
+  try {
+    // Call start-chat API
+    await coffeeMlService.startChat(item.user_id);
+    // Navigate to chat with user name
+    router.push({
+      pathname: `/(chat)/${item.user_id}`,
+      params: { userName: name }
+    });
+  } catch (error: any) {
+    console.error('Error starting chat:', error);
+  }
 };
 
     return (
@@ -128,7 +151,6 @@ const handlePress = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Discover</Text>
-        <Text style={styles.subtitle}>Matches curated by Coffee-ml</Text>
       </View>
 
       {loading ? (
@@ -160,22 +182,17 @@ const handlePress = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F8F9FA',
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: 'gray',
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#1F2937',
   },
   header: {
     paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    paddingVertical: 20,
+    backgroundColor: '#FFFFFF',
   },
   center: {
     flex: 1,
@@ -208,15 +225,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   matchCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    backgroundColor: 'rgba(157, 133, 255, 0.07)',
+    borderRadius: 16,
     padding: 16,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    marginHorizontal: 16,
   },
   matchHeaderRow: {
     flexDirection: 'row',
@@ -239,31 +252,39 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   matchName: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    marginBottom: 2,
+    marginBottom: 4,
+    color: '#1F2937',
   },
   matchAvailability: {
     fontSize: 14,
-    color: '#666',
+    color: '#6B7280',
+    backgroundColor: '#DBEAFE',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 9999,
+    borderWidth: 1,
+    borderColor: '#DEE1E6',
+    alignSelf: 'flex-start',
   },
   matchScoreBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8F5FF',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    backgroundColor: 'rgba(157, 133, 255, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 9999,
   },
   matchScoreText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#7C4DFF',
+    color: '#9D85FF',
     marginLeft: 4,
   },
   vibe: {
     fontSize: 14,
-    color: '#333',
+    color: '#4B5563',
     marginBottom: 12,
     lineHeight: 20,
   },
@@ -271,47 +292,41 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionLabel: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#999',
-    marginBottom: 4,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    color: '#1F2937',
+    marginBottom: 8,
   },
   interestsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    gap: 8,
   },
   interestPill: {
-    backgroundColor: '#F0F0F0',
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    marginRight: 6,
-    marginBottom: 6,
+    backgroundColor: '#D1FAE5',
+    borderRadius: 9999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   interestText: {
-    fontSize: 12,
-    color: '#333',
+    fontSize: 13,
+    color: '#1F2937',
   },
   conversationStarter: {
     fontSize: 14,
-    color: '#333',
+    color: '#1F2937',
     lineHeight: 20,
-    backgroundColor: '#F8F5FF',
-    padding: 12,
-    borderRadius: 8,
   },
   sayHelloButton: {
-    backgroundColor: '#7C4DFF',
-    borderRadius: 8,
+    backgroundColor: 'rgba(157, 133, 255, 0.26)',
+    borderRadius: 9999,
     paddingVertical: 12,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 12,
   },
   sayHelloText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: '#171A1F',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });

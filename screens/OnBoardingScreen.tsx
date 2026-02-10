@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useOnboarding } from '../hooks/useOnboarding';
 
-const OnboardingScreen = ({ navigation }) => {
+const OnboardingScreen = ({ navigation }: { navigation: any }) => {
   const { messages, isLoading, error, isComplete, startOnboarding, sendMessage } = useOnboarding();
   const [input, setInput] = useState('');
 

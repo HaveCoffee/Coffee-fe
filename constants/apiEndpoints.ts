@@ -10,6 +10,12 @@ const API_ENDPOINTS = {
     LOGOUT: '/auth/logout',
   },
   
+  // User endpoints
+  USER: {
+    GET_ME: '/me',
+    UPDATE_ME: '/me',
+  },
+  
   // Profile endpoints
   PROFILE: {
     GET_PROFILE: '/api/profile',
@@ -18,7 +24,11 @@ const API_ENDPOINTS = {
 
   // Matches endpoints
   MATCHES: {
-    GET_MATCHES: '/api/matches',
+    GET_SUGGESTED: '/api/matches/suggested',
+    GET_ACTIVE: '/api/matches/active',
+    START_CHAT: '/api/matches/start-chat',
+    PASS: '/api/matches/pass',
+    BLOCK: '/api/matches/block',
   },
 
   // Users endpoints
@@ -29,6 +39,13 @@ const API_ENDPOINTS = {
   // Chat endpoints
   CHAT: {
     SEND_MESSAGE: '/chat',
+  },
+
+  // User-to-User Chat endpoints
+  USER_CHAT: {
+    GET_MESSAGES: (userId: string) => `/chat/${userId}`,
+    SEND_MESSAGE: (userId: string) => `/chat/${userId}`,
+    MARK_READ: (userId: string) => `/chat/${userId}/read`,
   }
 };
 

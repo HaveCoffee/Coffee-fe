@@ -20,10 +20,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../components/Avatar';
-import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
+import { useAuth } from '../context/AuthContext';
 import { chatService, MatchCard, Message, OptionButton } from '../services/chatService';
 import { coffeeMlService } from '../services/coffeeMlService';
-import { logVerificationResults, verifyChatAPIEndpoints } from '../utils/apiVerifier';
 
 const { width } = Dimensions.get('window');
 const INPUT_BAR_MIN_HEIGHT = 60;
@@ -31,6 +30,7 @@ const INPUT_BAR_MIN_HEIGHT = 60;
 export default function EllaChat() {
   const params = useLocalSearchParams<{ onboarding?: string }>();
   const isOnboarding = params.onboarding === 'true';
+  const { checkOnboarding } = useAuth();
   
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -41,7 +41,6 @@ export default function EllaChat() {
   const flatListRef = useRef<FlatList>(null);
   const inputContainerRef = useRef<View>(null);
   const router = useRouter();
-  const { isRecording, startRecording, stopRecording } = useVoiceRecorder();
   const insets = useSafeAreaInsets();
 
   // Keyboard show/hide handlers
@@ -92,13 +91,6 @@ export default function EllaChat() {
       // Load stored thread_id for conversation continuity
       const storedThreadId = await chatService.getThreadId();
       setThreadId(storedThreadId);
-      
-      // Verify API endpoints in development mode (only once)
-      if (__DEV__ && !(global as any).__API_VERIFIED__) {
-        (global as any).__API_VERIFIED__ = true;
-        const results = await verifyChatAPIEndpoints();
-        logVerificationResults(results);
-      }
       
       // Coffee-ml API doesn't provide chat history endpoint
       // Conversation continuity is maintained via thread_id
@@ -257,6 +249,19 @@ export default function EllaChat() {
           m.id === tempId ? { ...m, status: 'failed' } : m
         )
       );
+      
+      // Show user-friendly error
+      const errorMessage: Message = {
+        id: `error-${Date.now()}`,
+        type: 'text',
+        content: error instanceof Error && error.message.includes('backend') 
+          ? '⚠️ Chat server is not responding. Please contact support or try again later.'
+          : '⚠️ Failed to send message. Please try again.',
+        sender: 'bot',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        status: 'sent',
+      };
+      setMessages(prev => [...prev, errorMessage]);
     }
   };
 
@@ -414,7 +419,23 @@ export default function EllaChat() {
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Ella</Text>
         </View>
-        <TouchableOpacity style={styles.infoButton}>
+        <TouchableOpacity style={styles.infoButton} onPress={async () => {
+          try {
+            console.log('🔍 [ELLA] Manual profile check triggered...');
+            const isComplete = await checkProfileComplete();
+            
+            if (isComplete) {
+              console.log('🔄 [ELLA] Updating AuthContext...');
+              await checkOnboarding();
+              console.log('✅ [ELLA] Navigating to main app');
+              router.replace('/(tabs)');
+            } else {
+              console.log('⚠️ [ELLA] Profile not complete yet');
+            }
+          } catch (error) {
+            console.error('Manual profile check error:', error);
+          }
+        }}>
           <Ionicons name="information-circle-outline" size={24} color="#2F2F2F" />
         </TouchableOpacity>
       </View>
@@ -451,17 +472,6 @@ export default function EllaChat() {
             styles.inputContainer,
             { 
               paddingBottom: Math.max(insets.bottom, 8),
-              minHeight: INPUT_BAR_MIN_HEIGHT,
-              paddingHorizontal: 16,
-              paddingTop: 8,
-              justifyContent: 'space-between',
-              backgroundColor: '#fff',
-              borderTopWidth: StyleSheet.hairlineWidth,
-              borderTopColor: '#E5E5E5',
-              transform: [
-                { translateY: -keyboardHeight },
-              ],
-              marginBottom: keyboardHeight > 0 ? 8 : 0, // Add extra margin when keyboard is visible
             },
           ]}
         >
@@ -469,9 +479,9 @@ export default function EllaChat() {
             value={inputText}
             onChangeText={setInputText}
             placeholder="Type your message..."
-            placeholderTextColor="#999"
-            style={[styles.input, { flex: 1, marginRight: 8 }]}
-            multiline
+            placeholderTextColor="#9CA3AF"
+            style={styles.input}
+            multiline={false}
             maxLength={500}
             autoFocus
             onFocus={() => {
@@ -479,35 +489,14 @@ export default function EllaChat() {
             }}
           />
           <TouchableOpacity
-            style={[styles.sendButton, { marginLeft: 8 }]}
+            style={styles.sendButton}
             onPress={() => handleSend()}
             disabled={!inputText.trim()}
           >
-            <Ionicons name="send" size={20} color="#fff" />
+            <Ionicons name="send" size={20} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-
-      {/* Recording Overlay */}
-      {isRecording && (
-        <View style={styles.recordingOverlay}>
-          <View style={styles.recordingContainer}>
-            <View style={styles.recordingIndicator}>
-              <Ionicons name="mic" size={32} color="#fff" />
-            </View>
-            <Text style={styles.recordingText}>Listening...</Text>
-            <Text style={styles.recordingHint}>Tap cancel to stop</Text>
-            <TouchableOpacity
-              style={styles.cancelRecordingButton}
-              onPress={async () => {
-                await stopRecording();
-              }}
-            >
-              <Text style={styles.cancelRecordingText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
     </SafeAreaView>
   );
 }
@@ -515,7 +504,7 @@ export default function EllaChat() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F8F9FA',
   },
   chatWrapper: {
     flex: 1,
@@ -536,9 +525,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#F3F4F6',
   },
   backButton: {
     padding: 4,
@@ -573,36 +563,50 @@ const styles = StyleSheet.create({
   },
   messageBubble: {
     maxWidth: '75%',
-    padding: 12,
-    borderRadius: 18,
+    padding: 16,
+    borderRadius: 16,
   },
   botBubble: {
-    backgroundColor: '#F5F5F5',
-    borderTopLeftRadius: 4,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 0,
+    borderBottomRightRadius: 16,
+    shadowColor: '#171a1f',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
   },
   userBubble: {
-    backgroundColor: '#7C4DFF',
-    borderTopRightRadius: 4,
+    backgroundColor: '#9D85FF',
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: 16,
+    shadowColor: '#171a1f',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
   },
   failedBubble: {
     borderWidth: 1,
     borderColor: '#FF3B30',
   },
   messageText: {
-    fontSize: 15,
+    fontSize: 16,
     lineHeight: 20,
-    color: '#2F2F2F',
+    fontWeight: '400',
+    color: '#171A1F',
+    fontFamily: 'Montserrat',
   },
   userText: {
-    color: '#fff',
+    color: '#FFFFFF',
   },
   messageTime: {
-    fontSize: 11,
-    color: '#999',
-    marginTop: 4,
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: 6,
   },
   userMessageTime: {
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(255,255,255,0.8)',
   },
   retryButton: {
     marginTop: 8,
@@ -734,76 +738,38 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 8,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#E5E5E5',
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    shadowColor: '#171a1f',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 4,
   },
   input: {
-    minHeight: 40,
-    maxHeight: 120,
-    backgroundColor: '#F5F5F5',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    flex: 1,
+    height: 48,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 12,
     fontSize: 16,
-    color: '#333',
+    lineHeight: 26,
+    fontWeight: '400',
+    color: '#565D6D',
+    fontFamily: 'Montserrat',
+    borderWidth: 1,
+    borderColor: '#DEE1E6',
+    marginRight: 12,
   },
   sendButton: {
-    width: 36,
+    width: 40,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: '#7C4DFF',
+    borderRadius: 16,
+    backgroundColor: '#9D85FF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 4,
-  },
-  recordingOverlay: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  recordingContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 32,
-    alignItems: 'center',
-    minWidth: 200,
-  },
-  recordingIndicator: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#7C4DFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  recordingText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2F2F2F',
-    marginBottom: 8,
-  },
-  recordingHint: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
-  },
-  cancelRecordingButton: {
-    backgroundColor: '#FF3B30',
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    borderRadius: 20,
-  },
-  cancelRecordingText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

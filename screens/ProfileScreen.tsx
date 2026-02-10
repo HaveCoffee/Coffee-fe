@@ -4,79 +4,73 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/AuthContext';
-import { authService } from '../services/authService';
+import { coffeeMlService } from '../services/coffeeMlService';
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, logout } = useAuth();
 
-  const [isOpenToMeet, setIsOpenToMeet] = useState<boolean>(user?.isOpenToMeet ?? true);
-  const [website, setWebsite] = useState(user?.website ?? '');
-  const [pronouns, setPronouns] = useState(user?.pronouns ?? '');
-  const [aboutText, setAboutText] = useState(user?.about ?? '');
+  const [isOpenToMeet, setIsOpenToMeet] = useState<boolean>(true);
+  const [website, setWebsite] = useState('');
+  const [pronouns, setPronouns] = useState('');
+  const [aboutText, setAboutText] = useState('');
   const [fullName, setFullName] = useState(user?.name ?? '');
-  const [email, setEmail] = useState(user?.email ?? '');
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const [demographics, setDemographics] = useState<string[]>(user?.demographics ?? []);
-  const [traits, setTraits] = useState<string[]>(user?.traits ?? []);
-  const [conversationTopics, setConversationTopics] = useState<string[]>(user?.conversationTopics ?? []);
-  const [coffeePreferences, setCoffeePreferences] = useState<string[]>(user?.coffeePreferences ?? []);
+  const [demographics, setDemographics] = useState<string[]>([]);
+  const [traits, setTraits] = useState<string[]>([]);
+  const [conversationTopics, setConversationTopics] = useState<string[]>([]);
+  const [coffeePreferences, setCoffeePreferences] = useState<string[]>([]);
 
-  const [demographicsInput, setDemographicsInput] = useState('');
-  const [traitsInput, setTraitsInput] = useState('');
-  const [conversationTopicsInput, setConversationTopicsInput] = useState('');
-  const [coffeePreferencesInput, setCoffeePreferencesInput] = useState('');
-
-  const username = user?.username || user?.email || 'you';
+  const username = user?.mobile_number || 'you';
 
   useEffect(() => {
-    if (user) {
-      setFullName(user.name || '');
-      setEmail(user.email || '');
-      setAboutText(user.about || '');
-      setPronouns(user.pronouns || '');
-      setWebsite(user.website || '');
-      setIsOpenToMeet(user.isOpenToMeet ?? true);
-      setDemographics(user.demographics ?? []);
-      setTraits(user.traits ?? []);
-      setConversationTopics(user.conversationTopics ?? []);
-      setCoffeePreferences(user.coffeePreferences ?? []);
-    }
+    loadProfile();
   }, []);
+
+  const loadProfile = async () => {
+    try {
+      setIsLoading(true);
+      const profile = await coffeeMlService.getOwnProfile();
+      
+      if (profile?.profile_data) {
+        const data = profile.profile_data;
+        
+        // Map Coffee-ML data to UI fields
+        setAboutText(data.vibe_summary || '');
+        setConversationTopics(Array.isArray(data.interests) ? data.interests : []);
+        setCoffeePreferences(data.social_intent ? [data.social_intent] : []);
+        setTraits(data.personality_type ? [data.personality_type] : []);
+        
+        // Demographics from availability
+        if (data.availability?.days) {
+          setDemographics(data.availability.days);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading profile:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSave = async () => {
     try {
       setIsSaving(true);
-
-      const payload = {
-        name: fullName.trim(),
-        email: email.trim(),
-        about: aboutText.trim(),
-        pronouns: pronouns.trim(),
-        website: website.trim(),
-        isOpenToMeet,
-        demographics,
-        traits,
-        conversationTopics,
-        coffeePreferences,
-      };
-
-      const updated = await authService.updateProfile(payload);
-      updateUser({ ...payload, ...updated });
-
-      Alert.alert('Saved', 'Your profile has been updated.');
+      // Note: Profile update functionality would need to be implemented
+      // when the backend supports profile updates
+      Alert.alert('Info', 'Profile update feature will be available soon.');
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to update profile');
     } finally {
@@ -84,46 +78,27 @@ export default function ProfileScreen() {
     }
   };
 
-  const renderTagInput = (
-    value: string,
-    setValue: (v: string) => void,
-    items: string[],
-    setItems: (v: string[]) => void,
-    placeholder: string
-  ) => (
-    <>
-      <View style={styles.inputRow}>
-        <TextInput
-          style={styles.inputFlex}
-          placeholder={placeholder}
-          value={value}
-          onChangeText={setValue}
-          placeholderTextColor="#999"
-        />
-        <TouchableOpacity
-          style={styles.inlineAddBtn}
-          onPress={() => {
-            const trimmed = value.trim();
-            if (!trimmed || items.includes(trimmed)) return;
-            setItems([...items, trimmed]);
-            setValue('');
-          }}
-        >
-          <Ionicons name="checkmark" size={18} color="#fff" />
-        </TouchableOpacity>
+  const renderTags = (items: string[]) => (
+    items.length > 0 && (
+      <View style={styles.tagsContainer}>
+        {items.map((item, idx) => (
+          <View key={`${item}-${idx}`} style={styles.tag}>
+            <Text style={styles.tagText}>{item}</Text>
+          </View>
+        ))}
       </View>
-
-      {items.length > 0 && (
-        <View style={styles.tagsContainer}>
-          {items.map((item, idx) => (
-            <View key={`${item}-${idx}`} style={styles.tag}>
-              <Text style={styles.tagText}>{item}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-    </>
+    )
   );
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#9D85FF" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -145,96 +120,148 @@ export default function ProfileScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Profile */}
         <View style={styles.profileSection}>
-          <Avatar size={92} />
-          <Text style={styles.greeting}>{fullName ? `Hello, ${fullName}!` : 'Hello!'}</Text>
+          <Avatar size={80} />
+          <Text style={styles.greeting}>Hello, {fullName || 'Alex'}!</Text>
           <TouchableOpacity>
             <Text style={styles.editPhotoText}>Edit Photo</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Basic Info */}
+        {/* Demographics */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Basic Info</Text>
-          <Text style={styles.fieldLabel}>Full Name</Text>
-          <TextInput style={styles.input} value={fullName} onChangeText={setFullName} />
-
-          <Text style={[styles.fieldLabel, styles.fieldSpacing]}>Email</Text>
-          <TextInput style={styles.input} value={email} onChangeText={setEmail} />
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Here's what we know about you</Text>
+            <TouchableOpacity>
+              <Ionicons name="create-outline" size={20} color="#9D85FF" />
+            </TouchableOpacity>
+          </View>
+          {renderTags(demographics)}
         </View>
 
+        {/* About You */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Here's what we know about you</Text>
-          {renderTagInput(
-            demographicsInput,
-            setDemographicsInput,
-            demographics,
-            setDemographics,
-            'Add detail'
-          )}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>About You</Text>
+            <TouchableOpacity>
+              <Ionicons name="create-outline" size={20} color="#9D85FF" />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.aboutText}>{aboutText || 'Tell us about yourself...'}</Text>
         </View>
 
+        {/* Your Traits */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>About You</Text>
-          <TextInput
-            style={[styles.input, styles.aboutInput]}
-            multiline
-            value={aboutText}
-            onChangeText={setAboutText}
-          />
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Your Traits</Text>
+            <TouchableOpacity>
+              <Ionicons name="create-outline" size={20} color="#9D85FF" />
+            </TouchableOpacity>
+          </View>
+          {renderTags(traits)}
         </View>
 
+        {/* Conversation Topics */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your Traits</Text>
-          {renderTagInput(traitsInput, setTraitsInput, traits, setTraits, 'Add trait')}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>A perfect conversation is about</Text>
+            <TouchableOpacity>
+              <Ionicons name="create-outline" size={20} color="#9D85FF" />
+            </TouchableOpacity>
+          </View>
+          {renderTags(conversationTopics)}
         </View>
 
+        {/* Coffee Preferences */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>A perfect conversation is about</Text>
-          {renderTagInput(
-            conversationTopicsInput,
-            setConversationTopicsInput,
-            conversationTopics,
-            setConversationTopics,
-            'Add topic'
-          )}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>A perfect coffee is with</Text>
+            <TouchableOpacity>
+              <Ionicons name="create-outline" size={20} color="#9D85FF" />
+            </TouchableOpacity>
+          </View>
+          {renderTags(coffeePreferences)}
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>A perfect coffee is with</Text>
-          {renderTagInput(
-            coffeePreferencesInput,
-            setCoffeePreferencesInput,
-            coffeePreferences,
-            setCoffeePreferences,
-            'Add preference'
-          )}
-        </View>
-
+        {/* Open to Meet */}
         <View style={styles.section}>
           <View style={styles.switchRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.sectionTitle}>Open to Meet</Text>
               <Text style={styles.sectionDescription}>
-                Let others know if you're open to meeting.
+                Let others know if you're open to meeting new people.
               </Text>
             </View>
-            <Switch value={isOpenToMeet} onValueChange={setIsOpenToMeet} />
+            <Switch 
+              value={isOpenToMeet} 
+              onValueChange={setIsOpenToMeet}
+              trackColor={{ false: '#E5E7EB', true: '#9D85FF' }}
+              thumbColor="#FFFFFF"
+            />
           </View>
         </View>
 
+        {/* Website */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Website</Text>
-          <TextInput style={styles.input} value={website} onChangeText={setWebsite} />
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Website</Text>
+            <TouchableOpacity>
+              <Ionicons name="create-outline" size={20} color="#9D85FF" />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.fieldDescription}>Add a link to drive traffic to your site</Text>
         </View>
 
+        {/* Pronouns */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Pronouns</Text>
-          <TextInput style={styles.input} value={pronouns} onChangeText={setPronouns} />
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Pronouns</Text>
+            <TouchableOpacity>
+              <Ionicons name="create-outline" size={20} color="#9D85FF" />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.fieldDescription}>Share how you like to be referred to</Text>
         </View>
 
+        {/* Username */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Username</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Username</Text>
+            <TouchableOpacity>
+              <Ionicons name="create-outline" size={20} color="#9D85FF" />
+            </TouchableOpacity>
+          </View>
           <Text style={styles.usernameText}>{username}</Text>
+        </View>
+
+        {/* Logout Button */}
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={styles.logoutButton}
+            onPress={() => {
+              Alert.alert(
+                'Logout',
+                'Are you sure you want to logout?',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Logout',
+                    style: 'destructive',
+                    onPress: async () => {
+                      try {
+                        await logout();
+                        router.replace('/(auth)');
+                      } catch (error) {
+                        Alert.alert('Error', 'Failed to logout');
+                      }
+                    },
+                  },
+                ]
+              );
+            }}
+          >
+            <Ionicons name="log-out-outline" size={20} color="#E53935" />
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -244,23 +271,28 @@ export default function ProfileScreen() {
 /* ================= STYLES ================= */
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: '#FFFFFF',
   },
   headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '600',
+    color: '#1F2937',
   },
   doneButton: {
-    color: '#7C4DFF',
+    backgroundColor: '#9D85FF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    color: '#FFFFFF',
     fontWeight: '600',
   },
 
@@ -270,99 +302,72 @@ const styles = StyleSheet.create({
 
   profileSection: {
     alignItems: 'center',
-    paddingVertical: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
+    paddingVertical: 24,
+    backgroundColor: '#FFFFFF',
+    marginBottom: 8,
   },
   greeting: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '600',
-    marginTop: 8,
+    marginTop: 12,
+    color: '#1F2937',
   },
   editPhotoText: {
-    marginTop: 6,
+    marginTop: 8,
     fontSize: 14,
-    color: '#7C4DFF',
+    color: '#9D85FF',
   },
 
   section: {
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    paddingVertical: 16,
+    backgroundColor: '#FFFFFF',
+    marginBottom: 8,
+  },
+
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
 
   sectionTitle: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
-    marginBottom: 8,
+    color: '#1F2937',
   },
   sectionDescription: {
     fontSize: 13,
-    color: '#666',
+    color: '#6B7280',
+    marginTop: 4,
   },
 
-  fieldLabel: {
+  aboutText: {
+    fontSize: 14,
+    color: '#4B5563',
+    lineHeight: 20,
+  },
+
+  fieldDescription: {
     fontSize: 13,
-    color: '#555',
-    marginBottom: 4,
-  },
-  fieldSpacing: {
-    marginTop: 10,
-  },
-
-  input: {
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-  },
-  inputFlex: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-  },
-
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-
-  inlineAddBtn: {
-    backgroundColor: '#7C4DFF',
-    borderRadius: 10,
-    padding: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
+    color: '#9CA3AF',
   },
 
   tagsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: 6,
+    gap: 8,
   },
   tag: {
-    backgroundColor: '#F2F2F2',
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    marginRight: 6,
-    marginBottom: 6,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   tagText: {
     fontSize: 13,
-  },
-
-  aboutInput: {
-    minHeight: 72,
-    textAlignVertical: 'top',
+    color: '#1F2937',
   },
 
   switchRow: {
@@ -373,6 +378,23 @@ const styles = StyleSheet.create({
 
   usernameText: {
     fontSize: 14,
-    color: '#333',
+    color: '#4B5563',
+  },
+
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E53935',
+    borderRadius: 12,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  logoutText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#E53935',
   },
 });

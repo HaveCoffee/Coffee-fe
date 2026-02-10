@@ -74,6 +74,7 @@ export default function OTPVerification() {
     }
 
     setErrorMessage(null);
+    console.log('🚀 [OTP] Starting verification...', { mobileNumber, flow, otpString });
 
     try {
       setIsLoading(true);
@@ -87,17 +88,34 @@ export default function OTPVerification() {
         throw new Error('Missing mobile number. Please go back and start again.');
       }
 
+      console.log('🔑 [OTP] Calling verify API...', { flow, mobileNumber, verificationId });
+
       if (flow === 'signup') {
         response = await authService.signupVerify(mobileNumber as string, verificationId, otpString);
       } else {
         response = await authService.loginVerify(mobileNumber as string, verificationId, otpString);
       }
+      
+      console.log('✅ [OTP] Verify response:', response);
 
       const token = response.token;
 
       if (token) {
         // Token is already stored by authService, but keep this for backward compatibility
         await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+        console.log('🔐 [OTP] Token stored successfully');
+        console.log('🔍 [OTP] Token details:', {
+          tokenLength: token.length,
+          tokenPreview: token.substring(0, 20) + '...',
+          authTokenKey: AUTH_TOKEN_KEY
+        });
+        
+        // Verify token was stored
+        const storedToken = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+        console.log('🔍 [OTP] Token verification after storage:', {
+          stored: !!storedToken,
+          matches: storedToken === token
+        });
       } else if (flow === 'signup') {
         // Signup verify may not return a token - user needs to login
         // But according to API flow, we should have token. Try to proceed anyway.
@@ -109,37 +127,21 @@ export default function OTPVerification() {
 
       // Update user context based on backend response and navigation params
       const userPayload = {
-        user_id: (response.user_id || response.id || mobileNumber) as string,
-        name: (response.name || response.full_name || fullName || '') as string,
-        email: (response.email || email || '') as string,
-        mobile_number: (response.mobile_number || mobileNumber) as string,
+        user_id: (response.user?.user_id || response.user_id || mobileNumber) as string,
+        name: (response.user?.name || response.name || fullName || '') as string,
+        email: (response.user?.email || response.email || email || '') as string,
+        mobile_number: (response.user?.mobile_number || response.mobile_number || mobileNumber) as string,
       };
+      
+      console.log('👤 [OTP] User payload:', userPayload);
 
       await login(userPayload);
 
-      // Check if profile is complete (only if we have a token)
-      if (token) {
-        try {
-          const isProfileComplete = await checkProfileComplete();
-
-          // Navigate based on profile completion status
-          if (isProfileComplete) {
-            router.replace('/(tabs)');
-          } else {
-            // Navigate to onboarding chat for new users or users with incomplete profiles
-            router.replace('/ella-chat?onboarding=true');
-          }
-        } catch (error) {
-          // If profile check fails, assume incomplete and go to onboarding
-          console.error('Profile check failed, proceeding to onboarding:', error);
-          router.replace('/ella-chat?onboarding=true');
-        }
-      } else {
-        // No token - go to onboarding (will handle auth errors there)
-        router.replace('/ella-chat?onboarding=true');
-      }
+      // Let AuthContext handle routing based on onboarding status
+      console.log('🔍 [OTP] Login completed, AuthContext will handle routing...');
     } catch (error: any) {
       const errorMsg = error.message || 'Verification failed';
+      console.error('❌ [OTP] Verification error:', error);
       setErrorMessage(errorMsg);
 
       const lower = errorMsg.toLowerCase();
@@ -275,6 +277,11 @@ setOtp(['', '', '', '']); // Clear OTP inputs
         <View style={styles.card}>
           <Text style={styles.title}>Enter OTP</Text>
           <Text style={styles.subtitle}>We sent a 6-digit code to {mobileNumber}</Text>
+          
+          {/* Dev Mode Notice */}
+          <View style={styles.devNotice}>
+            <Text style={styles.devNoticeText}>🧪 DEV MODE: Use any 6 digits (e.g., 123456)</Text>
+          </View>
 
           <View style={styles.otpContainer}>
             {[...Array(4)].map((_, index) => (
@@ -473,5 +480,19 @@ const styles = StyleSheet.create({
     color: '#6B46C1',
     fontWeight: 'bold',
     marginLeft: 5,
+  },
+  devNotice: {
+    backgroundColor: '#FFF3CD',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#FFEAA7',
+  },
+  devNoticeText: {
+    color: '#856404',
+    fontSize: 12,
+    textAlign: 'center',
+    fontWeight: '500',
   },
 });

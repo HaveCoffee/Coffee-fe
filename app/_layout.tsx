@@ -6,48 +6,75 @@ import { useEffect, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 import { AuthProvider, useAuth } from '../context/AuthContext';
+import { WebSocketProvider } from '../context/WebSocketContext';
+import { NotificationProvider } from '../context/NotificationContext';
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   return (
     <AuthProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
-        <AppContent />
-      </ThemeProvider>
+      <WebSocketProvider>
+        <NotificationProvider>
+          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+            <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+            <AppContent />
+          </ThemeProvider>
+        </NotificationProvider>
+      </WebSocketProvider>
     </AuthProvider>
   );
 }
 
 function AppContent() {
-  const { token, isLoading } = useAuth();
+  const { token, isLoading, hasCompletedOnboarding, checkOnboarding } = useAuth();
   const segments = useSegments();
   const hasNavigatedRef = useRef(false);
 
-  // Reset navigation to home tab when app loads with valid token
+  // Check onboarding status and route accordingly when app loads with valid token
   useEffect(() => {
     if (!isLoading && token && !hasNavigatedRef.current) {
-      // Small delay to ensure navigation is ready
-      const timer = setTimeout(() => {
+      const timer = setTimeout(async () => {
         try {
-          // Check current route
-          const currentRoute = segments[0];
+          console.log('🔍 [LAYOUT] Routing check:', { hasCompletedOnboarding, token: !!token });
           
-          // If we're not on the tabs route, navigate to home tab
-          // This ensures we always start at home on app reload
-          if (currentRoute !== '(tabs)') {
-            router.replace('/(tabs)');
+          // Check if user has completed onboarding
+          if (hasCompletedOnboarding === null) {
+            // First time checking, trigger the check
+            console.log('🔍 [LAYOUT] Triggering onboarding check...');
+            await checkOnboarding();
+            return; // Let the next effect handle routing
           }
+          
+          const currentRoute = segments[0];
+          console.log('🔍 [LAYOUT] Current route:', currentRoute);
+          
+          if (hasCompletedOnboarding) {
+            // Returning user with profile - go to main app
+            console.log('✅ [LAYOUT] User has profile, routing to main app');
+            if (currentRoute !== '(tabs)') {
+              router.replace('/(tabs)');
+            }
+          } else {
+            // New user without profile - show onboarding modal first
+            console.log('⚠️ [LAYOUT] User needs onboarding, routing to onboarding modal');
+            if (currentRoute !== 'modal') {
+              router.replace('/modal?type=onboarding');
+            }
+          }
+          
           hasNavigatedRef.current = true;
         } catch (error) {
-          console.warn('Navigation reset failed:', error);
+          console.warn('Navigation routing failed:', error);
+          // Fallback to main app on error
+          router.replace('/(tabs)');
+          hasNavigatedRef.current = true;
         }
       }, 150);
       
       return () => clearTimeout(timer);
     }
-  }, [token, isLoading, segments]);
+  }, [token, isLoading, hasCompletedOnboarding, segments, checkOnboarding]);
 
   // Reset the ref when token changes (logout/login)
   useEffect(() => {
@@ -66,40 +93,23 @@ function AppContent() {
 
   return (
     <Stack screenOptions={{
-      headerStyle: {
-        backgroundColor: '#fff',
-      },
-      headerTintColor: '#000',
-      headerTitleStyle: {
-        fontWeight: '600',
-      },
-      headerShadowVisible: false,
+      headerShown: false,
     }}>
-      {!token ? (
-        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-      ) : (
-        <>
-          <Stack.Screen 
-            name="(tabs)" 
-            options={{ 
-              headerShown: false,
-            }} 
-          />
-          <Stack.Screen 
-            name="(chat)" 
-            options={{ 
-              headerShown: false,
-            }} 
-          />
-          <Stack.Screen 
-            name="modal" 
-            options={{ 
-              presentation: 'modal',
-              headerShown: false,
-            }} 
-          />
-        </>
-      )}
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="(chat)" />
+      <Stack.Screen name="ella-chat" />
+      <Stack.Screen 
+        name="modal" 
+        options={{ 
+          presentation: 'modal',
+        }} 
+      />
+      <Stack.Screen name="coffee-match" />
+      <Stack.Screen name="profile-setup" />
+      <Stack.Screen name="report-abuse" />
+      <Stack.Screen name="new-chat" />
+      <Stack.Screen name="index" />
     </Stack>
   );
 }

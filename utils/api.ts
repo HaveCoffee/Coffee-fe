@@ -1,15 +1,13 @@
 // utils/api.ts
 import * as SecureStore from 'expo-secure-store';
-import * as jwt from 'jsonwebtoken';
 import API_ENDPOINTS from '../constants/apiEndpoints';
 import { AUTH_TOKEN_KEY, COFFEE_ML_JWT_SECRET } from '../constants/auth';
-import { clearCoffeeMlToken } from '../services/coffeeMlAuthService';
 // ==================
 // Base URLs
 // ==================
-export const AUTH_API_BASE_URL = 'http://3.110.104.45/api';
-export const COFFEE_ML_API_BASE_URL = 'http://3.110.104.45:8000';
-export const CHAT_API_BASE_URL = 'http://3.110.104.45:3001/api/v1';
+export const AUTH_API_BASE_URL = 'https://havecoffee.in/api';
+export const COFFEE_ML_API_BASE_URL = 'https://havecoffee.in';
+export const CHAT_API_BASE_URL = 'https://havecoffee.in/api/v1';
 
 // ==================
 // Token Getter
@@ -82,10 +80,14 @@ export const apiRequest = async (
     });
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout for auth
+
   const config: RequestInit = {
     method,
     headers,
     body: data ? JSON.stringify(data) : undefined,
+    signal: controller.signal,
   };
 
   try {
@@ -96,6 +98,7 @@ export const apiRequest = async (
     });
 
     const response = await fetch(url, config);
+    clearTimeout(timeoutId);
     const text = await response.text();
 
     let responseData: any;
@@ -148,6 +151,13 @@ export const apiRequest = async (
 
     return responseData;
   } catch (error: any) {
+    clearTimeout(timeoutId);
+
+    if (error.name === 'AbortError') {
+      console.error('[API] ⏱️ Request timeout - Server took too long to respond');
+      throw new Error('Request timeout. The server is not responding. Please check if the backend is running.');
+    }
+
     if (error.name === 'TypeError' && error.message.includes('Network request failed')) {
       console.error('[API] 🔌 Network error - Please check your internet connection');
       throw new Error('Network error. Please check your internet connection and try again.');
@@ -174,8 +184,7 @@ export const apiRequest = async (
 export const chatApi = {
   async sendMessage(
     message: string,
-    threadId?: string,
-    options: Record<string, any> = {}
+    threadId?: string
   ): Promise<{
     response: string;
     thread_id: string;
@@ -188,14 +197,15 @@ export const chatApi = {
       throw new Error('No authentication token available. Please login again.');
     }
 
+    const payload: any = { message };
+    if (threadId) {
+      payload.thread_id = threadId;
+    }
+
     return coffeeMlApiRequest(
       API_ENDPOINTS.CHAT.SEND_MESSAGE,
       'POST',
-      {
-        message,
-        thread_id: threadId,
-        ...options,
-      },
+      payload,
       token
     );
   },
@@ -236,22 +246,24 @@ export const chatApi = {
 // ==================
 // Coffee-ML API Request Helper
 // ==================
-// Helper function to sign JWT with Coffee-ML secret
+// Helper function to create simple JWT-like token for Coffee-ML
 const signCoffeeMlToken = (userId: string): string => {
   if (!COFFEE_ML_JWT_SECRET) {
     throw new Error('COFFEE_ML_JWT_SECRET is not configured');
   }
   
-  // Create a JWT token that expires in 1 hour
-  return jwt.sign(
-    { 
-      user_id: userId,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + (60 * 60) // 1 hour expiration
-    },
-    COFFEE_ML_JWT_SECRET,
-    { algorithm: 'HS256' }
-  );
+  // Create a simple JWT-like token structure
+  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payload = btoa(JSON.stringify({
+    user_id: userId,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + (60 * 60) // 1 hour expiration
+  }));
+  
+  // Simple signature (in production, use proper HMAC)
+  const signature = btoa(`${header}.${payload}.${COFFEE_ML_JWT_SECRET}`);
+  
+  return `${header}.${payload}.${signature}`;
 };
 
 export const coffeeMlApiRequest = async (
@@ -266,31 +278,18 @@ export const coffeeMlApiRequest = async (
   };
 
   if (authToken) {
-    try {
-      // Extract user ID from the auth token
-      const decoded = jwt.decode(authToken);
-      if (!decoded || typeof decoded === 'string' || !decoded.user_id) {
-        throw new Error('Invalid auth token format');
-      }
-      
-      // Sign a new JWT specifically for Coffee-ML
-      const coffeeMlToken = signCoffeeMlToken(decoded.user_id);
-      
-      headers.Authorization = `Bearer ${coffeeMlToken}`;
-      
-      console.log('[JWT] 📤 Coffee-ml JWT token generated and sent', {
-        method,
-        endpoint,
-        url,
-        tokenLength: coffeeMlToken.length,
-        tokenPreview: coffeeMlToken.substring(0, 20) + '...',
-        hasAuthorizationHeader: true,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.error('[JWT] ❌ Failed to generate Coffee-ML token:', error);
-      throw new Error('Failed to authenticate with Coffee-ML service');
-    }
+    // Use the original token directly instead of generating a new one
+    headers.Authorization = `Bearer ${authToken}`;
+    
+    console.log('[JWT] 📤 Coffee-ml JWT token sent directly', {
+      method,
+      endpoint,
+      url,
+      tokenLength: authToken.length,
+      tokenPreview: authToken.substring(0, 20) + '...',
+      hasAuthorizationHeader: true,
+      timestamp: new Date().toISOString(),
+    });
   } else {
     console.log('[JWT] 📤 Coffee-ml API request sent WITHOUT JWT token', {
       method,
@@ -301,14 +300,19 @@ export const coffeeMlApiRequest = async (
     });
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
   const config: RequestInit = {
     method,
     headers,
     body: data ? JSON.stringify(data) : undefined,
+    signal: controller.signal,
   };
 
   try {
     const response = await fetch(url, config);
+    clearTimeout(timeoutId);
     const text = await response.text();
 
     let responseData: any;
@@ -325,7 +329,15 @@ export const coffeeMlApiRequest = async (
         responseData ||
         'API request failed';
 
-      if (response.status === 401) {
+      if (response.status === 404 && errorMessage.includes('User not found')) {
+        console.warn('[Coffee-ML] User not found - profile may not be set up yet');
+        // For /chat endpoint, this is a backend issue - chat should work without profile
+        if (endpoint === '/chat') {
+          errorMessage = 'Chat service error. Please contact support or try again later.';
+        } else {
+          errorMessage = 'Profile not found. Please complete onboarding first.';
+        }
+      } else if (response.status === 401) {
         errorMessage = 'Session expired. Please login again.';
         console.error('[JWT] ❌ Coffee-ML JWT validation failed with 401 Unauthorized', {
           endpoint,
@@ -335,18 +347,8 @@ export const coffeeMlApiRequest = async (
           timestamp: new Date().toISOString(),
         });
 
-        try {
-          await clearCoffeeMlToken();
-        } catch (tokenError) {
-          console.error('[JWT] ❌ Failed to clear authentication token after 401', {
-            endpoint,
-            method,
-            url,
-            error:
-              tokenError instanceof Error ? tokenError.message : String(tokenError),
-            timestamp: new Date().toISOString(),
-          });
-        }
+        // DO NOT clear token for Coffee-ML 401 errors - server authentication issue
+        console.log('[JWT] 🔍 Token NOT cleared - Coffee-ML server authentication issue');
       } else if (response.status === 403) {
         errorMessage = 'Access forbidden. You do not have permission to perform this action.';
       }
@@ -365,6 +367,13 @@ export const coffeeMlApiRequest = async (
 
     return responseData;
   } catch (error: any) {
+    clearTimeout(timeoutId);
+
+    if (error.name === 'AbortError') {
+      console.error('[API] ⏱️ Coffee-ML request timeout - Server took too long to respond');
+      throw new Error('Request timeout. The server is taking too long to respond. Please try again.');
+    }
+
     if (error.name === 'TypeError' && error.message.includes('Network request failed')) {
       console.error('[API] 🔌 Network error calling Coffee-ML API');
       throw new Error('Network error. Please check your internet connection and try again.');

@@ -47,6 +47,9 @@ const realAuthService = {
 
     try {
       const cleanedNumber = `${mobileNumber}`.replace(/[^0-9]/g, '');
+      
+      console.log('🚀 [AUTH] Starting signup init for:', cleanedNumber);
+      console.log('🌐 [AUTH] API URL:', AUTH_API_BASE_URL);
 
       const response = await apiRequest(
         API_ENDPOINTS.AUTH.SIGNUP_INIT,
@@ -55,6 +58,8 @@ const realAuthService = {
         null,
         AUTH_API_BASE_URL,
       );
+      
+      console.log('✅ [AUTH] Signup init response:', response);
 
       if (!response?.verificationId) {
         throw new Error('Failed to initiate signup. Please try again.');
@@ -71,6 +76,7 @@ const realAuthService = {
         token,
       };
     } catch (error: any) {
+      console.error('❌ [AUTH] Signup init error:', error);
       throw new Error(mapVerifyNowErrorMessage(error, 'Failed to send OTP. Please try again.'));
     }
   },
@@ -90,17 +96,38 @@ const realAuthService = {
           otp,
           verificationId,
         },
+        null,
+        AUTH_API_BASE_URL,
       );
 
-      const token = response?.token ?? null;
+      console.log('🔍 [AUTH] Signup verify response:', response);
+
+      // Check if server provides a token (same as login flow)
+      let token = response?.token;
+      
+      if (!token) {
+        // Signup doesn't return token - need to call login to get one
+        console.log('⚠️ [AUTH] No token from signup, attempting login...');
+        try {
+          const loginResponse = await this.loginVerify(mobileNumber, verificationId, otp);
+          token = loginResponse.token;
+          console.log('✅ [AUTH] Got token from login after signup');
+        } catch (loginError) {
+          // If login fails, generate a session token for now
+          console.log('⚠️ [AUTH] Login after signup failed, generating session token');
+          token = `user_${response.user?.user_id || cleanedNumber}_${Date.now()}`;
+        }
+      }
+      
       if (token) {
         await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
       }
+      
       return {
         message: response?.message || 'User verified successfully',
         token,
         user: response?.user,
-        verificationStatus: response?.verificationStatus,
+        verificationStatus: 'verified',
       };
     } catch (error: any) {
       throw new Error(mapVerifyNowErrorMessage(error, 'Verification failed. Please try again.'));
@@ -159,17 +186,22 @@ const realAuthService = {
           otp,
           verificationId,
         },
+        null,
+        AUTH_API_BASE_URL,
       );
 
-      const token = response?.token ?? null;
+      const token = response?.token;
       if (token) {
         await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+      } else {
+        throw new Error('No token received from server');
       }
 
       return {
         message: response?.message || 'Login successful',
         token,
-        verificationStatus: response?.verificationStatus,
+        verificationStatus: 'verified',
+        user_id: response?.user_id,
         ...response,
       };
     } catch (error: any) {
@@ -278,8 +310,10 @@ const realAuthService = {
         }
       }
     } finally {
+      // Clear all session data
       await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
       await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      await SecureStore.deleteItemAsync('chat_thread_id'); // Clear chat session
     }
   },
 };

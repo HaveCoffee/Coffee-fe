@@ -3,10 +3,7 @@ export type RootStackParamList = {
   Auth: undefined;
   OtpVerification: { phoneNumber: string };
   Main: undefined;
-  Conversation: { conversationId: string };
-  CoffeeMatch: { matchId: string };
-  ReportAbuse: undefined;
-  Profile: undefined;
+  Onboarding: undefined;
 };
 
 export type MainTabParamList = {
@@ -18,21 +15,15 @@ export type MainTabParamList = {
 
 export type HomeStackParamList = {
   Home: undefined;
-  CoffeeMatch: { matchId: string; view?: 'profile' | 'chat' };
+  CoffeeMatch: { userId: string };
 };
 
 export type ChatStackParamList = {
-  Conversation: { id: string; recipientId?: string; recipientName?: string; recipientAvatar?: string };
-  CoffeeMatch: { matchId: string; view?: 'profile' | 'chat' };
+  Conversation: { id?: string };
+  CoffeeMatch: { userId: string };
 };
 
 export type DiscoverStackParamList = {
   Discover: undefined;
-  CoffeeMatch: { matchId: string; view?: 'profile' | 'chat' };
-};
-
-export type AuthStackParamList = {
-  Login: undefined;
-  Signup: undefined;
-  OtpVerification: { phoneNumber: string };
+  CoffeeMatch: { userId: string };
 };

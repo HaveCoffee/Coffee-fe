@@ -18,9 +18,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import * as SecureStore from 'expo-secure-store';
 import Avatar from '../components/Avatar';
 import { Colors } from '../constants/theme';
+import { AUTH_TOKEN_KEY } from '../constants/auth';
 import { useAuth } from '../context/AuthContext';
+import { useWebSocketContext } from '../context/WebSocketContext';
+import { useNotifications } from '../context/NotificationContext';
 import { useColorScheme } from '../hooks/use-color-scheme';
 import { conversationService, Message } from '../services/conversationService';
 
@@ -34,11 +38,14 @@ export default function ConversationScreen(props: ConversationScreenProps) {
   const { userId: propUserId, userName: propUserName } = props;
 
   const router = useRouter();
-  const { id: paramUserId } = useLocalSearchParams<{ id: string }>();
+  const { id: paramUserId, userName: paramUserName } = useLocalSearchParams<{ id: string; userName?: string }>();
   const { user } = useAuth();
+  const { isConnected, connectionState, sendMessage, joinChat, leaveChat, on, off } = useWebSocketContext();
+  const { markAsRead } = useNotifications();
   const theme = useColorScheme() ?? 'light';
 
   const userId = propUserId || paramUserId;
+  const initialUserName = propUserName || paramUserName || 'Chat';
 
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -46,6 +53,27 @@ export default function ConversationScreen(props: ConversationScreenProps) {
   const [isSending, setIsSending] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [chatUserName, setChatUserName] = useState(initialUserName);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  // Extract current user ID from JWT token
+  useEffect(() => {
+    const getCurrentUserId = async () => {
+      try {
+        const token = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+        if (token) {
+          // Decode JWT to get user ID
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          const userId = payload.userId || payload.user_id || payload.sub;
+          setCurrentUserId(userId);
+          console.log('Current user ID from JWT:', userId);
+        }
+      } catch (error) {
+        console.error('Failed to extract user ID from token:', error);
+      }
+    };
+    getCurrentUserId();
+  }, []);
 
   const flatListRef = useRef<FlatList>(null);
   const translateY = useRef(new Animated.Value(0)).current;
@@ -56,49 +84,175 @@ export default function ConversationScreen(props: ConversationScreenProps) {
 
     try {
       setIsLoading(true);
+      console.log(`📱 [CHAT] Loading conversation for user: ${userId}`);
+      
+      // If we don't have a user name, try to get it from the profile
+      if (!propUserName && !paramUserName) {
+        try {
+          const { coffeeMlService } = await import('../services/coffeeMlService');
+          const profile = await coffeeMlService.getPublicProfile(userId);
+          const profileData = profile.profile_data || {};
+          const userName = profileData.name || 
+                          profileData.display_name || 
+                          profileData.username ||
+                          // Extract from vibe_summary if available
+                          (profileData.vibe_summary ? 
+                            (() => {
+                              const vibeText = profileData.vibe_summary;
+                              const iAmMatch = vibeText.match(/I am ([A-Z][a-z]+)/i);
+                              if (iAmMatch) return iAmMatch[1];
+                              const nameMatch = vibeText.match(/(?:my name is|i'm|i am) ([A-Z][a-z]+)/i);
+                              if (nameMatch) return nameMatch[1];
+                              const firstWordMatch = vibeText.match(/^([A-Z][a-z]+)(?:\s|,|\.|!)/);
+                              if (firstWordMatch && firstWordMatch[1].length > 2) return firstWordMatch[1];
+                              return null;
+                            })()
+                          : null) ||
+                          `User ${userId.substring(0, 6)}`;
+          setChatUserName(userName);
+        } catch (error) {
+          console.log('Could not fetch user profile for name:', error);
+          setChatUserName(`User ${userId.substring(0, 6)}`);
+        }
+      }
+      
       const conversation =
         await conversationService.getConversationMessages(userId);
+      console.log(`📱 [CHAT] Loaded ${conversation.messages?.length || 0} messages`);
       setMessages(conversation.messages || []);
     } catch (error) {
       console.error('Error loading conversation:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [userId]);
+  }, [userId, propUserName, paramUserName]);
 
   useEffect(() => {
     loadConversation();
-  }, [loadConversation]);
+    
+    // Join chat room when component mounts
+    if (userId && isConnected) {
+      joinChat(userId);
+    }
+    
+    // Mark messages as read when entering this chat
+    if (userId) {
+      markAsRead(userId);
+    }
+    
+    // Listen for incoming messages
+    const handleNewMessage = (data: any) => {
+      console.log('[Chat] Received message event:', data);
+      if (data.type === 'chat_message') {
+        // Check if message is for this conversation
+        const isSender = data.senderId === userId || data.sender_id === userId;
+        const isRecipient = data.receiverId === userId || data.recipient_id === userId;
+        
+        if (isSender || isRecipient) {
+          const newMsg: Message = {
+            id: data.id || data.message_id || data.messageId || Date.now().toString(),
+            text: data.content || data.text || '',
+            senderId: data.senderId || data.sender_id || '',
+            recipientId: data.receiverId || data.recipient_id || '',
+            timestamp: data.createdAt || data.timestamp || new Date().toISOString(),
+            status: 'sent',
+          };
+          setMessages(prev => {
+            // Avoid duplicates
+            if (prev.find(m => m.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
+          scrollToBottom();
+        }
+      }
+    };
+    
+    // Listen for message delivery confirmations
+    const handleMessageDelivered = (data: any) => {
+      if (data.type === 'message_delivered') {
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === data.message_id ? { ...m, status: 'delivered' } : m
+          )
+        );
+      }
+    };
+    
+    // Listen for message read confirmations
+    const handleMessageRead = (data: any) => {
+      if (data.type === 'message_read') {
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === data.message_id ? { ...m, status: 'read' } : m
+          )
+        );
+      }
+    };
+    
+    // Listen for connection status
+    const handleConnectionChange = (data: any) => {
+      if (data.type === 'connected' && userId) {
+        console.log('[Chat] WebSocket connected - joining chat');
+        joinChat(userId);
+      }
+    };
+    
+    on('chat_message', handleNewMessage);
+    on('message_delivered', handleMessageDelivered);
+    on('message_read', handleMessageRead);
+    on('connected', handleConnectionChange);
+    
+    return () => {
+      off('chat_message', handleNewMessage);
+      off('message_delivered', handleMessageDelivered);
+      off('message_read', handleMessageRead);
+      off('connected', handleConnectionChange);
+      
+      if (userId) {
+        leaveChat(userId);
+      }
+    };
+  }, [loadConversation, userId, isConnected, joinChat, leaveChat, on, off]);
 
   /* ---------------- Send Message ---------------- */
   const handleSend = async () => {
     if (!message.trim() || !userId || isSending) return;
 
+    const messageText = message.trim();
+    setMessage('');
+    setIsSending(true);
+
+    const messageId = Date.now().toString();
     const newMessage: Message = {
-      id: Date.now().toString(),
-      text: message,
-      senderId: user?.id || '',
+      id: messageId,
+      text: messageText,
+      senderId: currentUserId || '',
       recipientId: userId,
       timestamp: new Date().toISOString(),
       status: 'sending',
     };
 
     setMessages(prev => [...prev, newMessage]);
-    setMessage('');
-    setIsSending(true);
 
     try {
-      await conversationService.sendMessage(userId, message);
+      if (!isConnected) {
+        throw new Error('Not connected to chat server');
+      }
+      
+      // Send via WebSocket only (no duplicate API call)
+      await conversationService.sendMessage(userId, messageText);
+      
+      // Update message status
       setMessages(prev =>
         prev.map(m =>
-          m.id === newMessage.id ? { ...m, status: 'sent' } : m
+          m.id === messageId ? { ...m, status: 'sent' } : m
         )
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending message:', error);
       setMessages(prev =>
         prev.map(m =>
-          m.id === newMessage.id ? { ...m, status: 'error' } : m
+          m.id === messageId ? { ...m, status: 'error' } : m
         )
       );
     } finally {
@@ -152,8 +306,9 @@ export default function ConversationScreen(props: ConversationScreenProps) {
 
   /* ---------------- Render Message ---------------- */
   const renderMessage = ({ item }: { item: Message }) => {
-    const isMe = item.senderId === user?.id;
+    const isMe = item.senderId === currentUserId;
     const isError = item.status === 'error';
+    const isSending = item.status === 'sending';
 
     return (
       <View style={[styles.messageContainer, isMe && styles.userMessageContainer]}>
@@ -168,7 +323,6 @@ export default function ConversationScreen(props: ConversationScreenProps) {
             styles.messageBubble,
             isMe ? styles.userBubble : styles.botBubble,
             isError && styles.failedBubble,
-            isMe && { backgroundColor: Colors[theme].tint },
           ]}
         >
           <Text style={[styles.messageText, isMe && styles.userText]}>{item.text}</Text>
@@ -177,8 +331,14 @@ export default function ConversationScreen(props: ConversationScreenProps) {
             {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
 
-          {isMe && isError && (
-            <TouchableOpacity style={styles.retryButton} onPress={() => handleSend()}>
+          {isError && (
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => {
+                setMessage(item.text);
+                setMessages(prev => prev.filter(m => m.id !== item.id));
+              }}
+            >
               <Ionicons name="refresh" size={16} color="#FF3B30" />
             </TouchableOpacity>
           )}
@@ -211,7 +371,12 @@ export default function ConversationScreen(props: ConversationScreenProps) {
           <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#000" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>{propUserName || 'Chat'}</Text>
+          <View style={{ flex: 1, alignItems: 'center' }}>
+            <Text style={styles.headerTitle}>{chatUserName}</Text>
+            {!isConnected && (
+              <Text style={styles.connectionStatusOffline}>Chat offline</Text>
+            )}
+          </View>
           <View style={{ width: 24 }} />
         </View>
 
@@ -245,18 +410,11 @@ export default function ConversationScreen(props: ConversationScreenProps) {
             />
 
             <TouchableOpacity
-              style={[
-                styles.sendButton,
-                { opacity: !message.trim() || isSending ? 0.6 : 1 },
-              ]}
+              style={styles.sendButton}
               onPress={handleSend}
-              disabled={!message.trim() || isSending}
+              disabled={!message.trim() || isSending || !isConnected}
             >
-              {isSending ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Ionicons name="send" size={20} color="#fff" />
-              )}
+              <Ionicons name="send" size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </Animated.View>
         </KeyboardAvoidingView>
@@ -267,20 +425,22 @@ export default function ConversationScreen(props: ConversationScreenProps) {
 
 /* ---------------- Styles ---------------- */
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#F3F4F6',
   },
-  headerTitle: { fontSize: 18, fontWeight: '600' },
-  chatWrapper: {
-    flex: 1,
-    position: 'relative',
+  headerTitle: { fontSize: 18, fontWeight: '600', color: '#2F2F2F' },
+  connectionStatusOffline: {
+    fontSize: 12,
+    color: '#F44336',
+    marginTop: 2,
   },
   messagesList: {
     flexGrow: 1,
@@ -301,67 +461,83 @@ const styles = StyleSheet.create({
   },
   messageBubble: {
     maxWidth: '75%',
-    padding: 12,
-    borderRadius: 18,
+    padding: 16,
+    borderRadius: 16,
   },
   botBubble: {
-    backgroundColor: '#F5F5F5',
-    borderTopLeftRadius: 4,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 0,
+    shadowColor: '#171a1f',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
   },
   userBubble: {
-    backgroundColor: '#7C4DFF',
-    borderTopRightRadius: 4,
+    backgroundColor: '#9D85FF',
+    borderTopRightRadius: 0,
+    shadowColor: '#171a1f',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
   },
   failedBubble: {
     borderWidth: 1,
     borderColor: '#FF3B30',
   },
   messageText: {
-    fontSize: 15,
+    fontSize: 16,
     lineHeight: 20,
-    color: '#2F2F2F',
+    color: '#171A1F',
   },
   userText: {
-    color: '#fff',
+    color: '#FFFFFF',
   },
   messageTime: {
-    fontSize: 11,
-    color: '#999',
-    marginTop: 4,
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: 6,
   },
   userMessageTime: {
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(255,255,255,0.8)',
   },
   retryButton: {
     marginTop: 8,
     padding: 4,
   },
-  statusIcon: { marginLeft: 4 },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 8,
-    paddingBottom: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    shadowColor: '#171a1f',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 4,
   },
   input: {
     flex: 1,
-    minHeight: 40,
-    maxHeight: 120,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 20,
-    paddingHorizontal: 16,
+    height: 48,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 12,
     fontSize: 16,
-    marginRight: 8,
+    color: '#565D6D',
+    borderWidth: 1,
+    borderColor: '#DEE1E6',
+    marginRight: 12,
   },
   sendButton: {
     width: 40,
-    height: 40,
-    borderRadius: 20,
+    height: 36,
+    borderRadius: 16,
+    backgroundColor: '#9D85FF',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#7C4DFF',
   },
 });

@@ -2,14 +2,20 @@
 import * as SecureStore from 'expo-secure-store';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { AUTH_TOKEN_KEY, REFRESH_TOKEN_KEY } from '../constants/auth';
+import { clearCoffeeMlToken } from '../services/coffeeMlAuthService';
+import { onboardingService } from '../services/onboardingService';
+import { userService } from '../services/userService';
 
 interface AuthContextType {
   user: any | null;
   token: string | null;
   isLoading: boolean;
+  isAuthenticated: boolean;
+  hasCompletedOnboarding: boolean | null;
   login: (userData: any) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (updates: any) => void;
+  checkOnboarding: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -18,6 +24,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<any | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<boolean | null>(null);
 
   useEffect(() => {
     const loadAuthState = async () => {
@@ -33,6 +40,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         if (storedToken) {
           setToken(storedToken);
+          // Check onboarding status if user is authenticated
+          try {
+            const onboardingComplete = await onboardingService.checkOnboardingStatus();
+            setHasCompletedOnboarding(onboardingComplete);
+          } catch (error) {
+            console.log('Failed to check onboarding status:', error);
+            setHasCompletedOnboarding(false);
+          }
         }
       } catch (error) {
         console.error('Failed to load user data', error);
@@ -54,6 +69,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const storedToken = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
         if (storedToken) {
           setToken(storedToken);
+          
+          // Check onboarding status after login
+          try {
+            const onboardingComplete = await onboardingService.checkOnboardingStatus();
+            setHasCompletedOnboarding(onboardingComplete);
+            console.log('🔍 [AUTH] Onboarding status after login:', onboardingComplete);
+          } catch (error) {
+            console.log('Failed to check onboarding status after login:', error);
+            setHasCompletedOnboarding(false);
+          }
         }
       } catch (error) {
         console.error('Failed to load auth token after login', error);
@@ -66,13 +91,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const logout = async () => {
     try {
+      console.log('🔐 Starting logout process...');
+      
+      // Clear all auth-related data
       await SecureStore.deleteItemAsync('user');
       await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
       await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      await SecureStore.deleteItemAsync('chat_thread_id'); // Clear chat session
+      
+      // Clear Coffee-ML token as well
+      try {
+        await clearCoffeeMlToken();
+      } catch (error) {
+        console.warn('Failed to clear Coffee-ML token:', error);
+      }
+      
+      // Reset state
       setUser(null);
       setToken(null);
+      setHasCompletedOnboarding(null);
+      
+      console.log('✅ Logout completed successfully');
     } catch (error) {
-      console.error('Failed to clear user data', error);
+      console.error('❌ Failed to clear user data during logout:', error);
       throw error;
     }
   };
@@ -83,15 +124,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
   };
 
+  const checkOnboarding = async () => {
+    try {
+      const onboardingComplete = await onboardingService.checkOnboardingStatus();
+      setHasCompletedOnboarding(onboardingComplete);
+    } catch (error) {
+      console.log('Failed to check onboarding status:', error);
+      setHasCompletedOnboarding(false);
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
         user,
         token,
         isLoading,
+        isAuthenticated: !!token && !!user,
+        hasCompletedOnboarding,
         login,
         logout,
         updateUser,
+        checkOnboarding,
       }}
     >
       {children}

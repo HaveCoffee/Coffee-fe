@@ -33,7 +33,6 @@ export default function LoginScreen() {
         throw new Error('Invalid response from OTP service');
       }
       
-      // Navigate to OTP screen with mobile number and verificationId
       router.push({
         pathname: '/otp-verification',
         params: { 
@@ -84,48 +83,48 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
+      <View style={styles.header}>
         <Text style={styles.title}>Hello there!</Text>
+      </View>
 
-        <View style={styles.heroIcon}>
-          <View style={styles.iconCircle}>
-            <Ionicons name="cafe" size={42} color="#fff" />
-          </View>
+      <View style={styles.content}>
+        <View style={styles.iconCircle}>
+          <Ionicons name="cafe" size={48} color="#FFFFFF" />
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.label}>Mobile Number</Text>
+        <View style={styles.inputContainer}>
           <View style={styles.phoneInput}>
             <Text style={styles.countryCode}>+91</Text>
             <TextInput
               style={styles.input}
               placeholder="Mobile Number"
               keyboardType="phone-pad"
-              placeholderTextColor="#9A9A9A"
+              placeholderTextColor="#9CA3AF"
               value={mobileNumber}
               onChangeText={(text) => setMobileNumber(text.replace(/[^0-9]/g, ''))}
               maxLength={10}
               editable={!isLoading}
             />
           </View>
-
-          <TouchableOpacity
-            style={[styles.button, isLoading && styles.buttonDisabled]}
-            onPress={handleGetOTP}
-            disabled={isLoading}
-            activeOpacity={0.9}
-          >
-            {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Get OTP</Text>}
-          </TouchableOpacity>
         </View>
 
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>Don't have an account?</Text>
-          <Link href="/signup" style={styles.link}>
-            {' '}
-            Sign Up
-          </Link>
-        </View>
+        <TouchableOpacity
+          style={[styles.button, (!mobileNumber || mobileNumber.length !== 10) && styles.buttonDisabled]}
+          onPress={handleGetOTP}
+          disabled={isLoading || !mobileNumber || mobileNumber.length !== 10}
+          activeOpacity={0.8}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.buttonText}>Get OTP</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.footer}>
+        <Text style={styles.footerText}>Don't have an account?</Text>
+        <Link href="/signup" style={styles.link}>Sign Up</Link>
       </View>
     </SafeAreaView>
   );
@@ -136,120 +135,93 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  content: {
-    flex: 1,
-    paddingHorizontal: 22,
-    justifyContent: 'center',
+  header: {
+    paddingTop: 20,
+    paddingBottom: 20,
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
   },
   title: {
-    fontSize: 28,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginBottom: 32,
-    color: '#1E1E1E',
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1F2937',
   },
-  heroIcon: {
-    alignItems: 'center',
-    marginBottom: 28,
+  content: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 48,
   },
   iconCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: '#7C4DFF',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#9D85FF',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#7C4DFF',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 6,
+    alignSelf: 'center',
+    marginBottom: 72,
   },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 18,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    elevation: 4,
-  },
-  label: {
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 8,
-    color: '#2E2E2E',
+  inputContainer: {
+    marginBottom: 16,
   },
   phoneInput: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F5F5F8',
-    borderRadius: 12,
-    paddingHorizontal: 14,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 16,
+    paddingHorizontal: 12,
     height: 56,
-    borderWidth: 1,
-    borderColor: '#E5E6EA',
+    borderWidth: 2,
+    borderColor: 'rgba(86, 93, 109, 0.2)',
   },
   countryCode: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1E1E1E',
-    marginRight: 10,
+    fontSize: 18,
+    fontWeight: '400',
+    color: '#565D6D',
+    marginRight: 8,
   },
   input: {
     flex: 1,
     height: '100%',
-    fontSize: 16,
-    color: '#1E1E1E',
+    fontSize: 18,
+    fontWeight: '400',
+    color: '#565D6D',
   },
   button: {
-    marginTop: 18,
-    backgroundColor: '#7C4DFF',
-    borderRadius: 14,
+    backgroundColor: '#9D85FF',
+    borderRadius: 16,
     height: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#7C4DFF',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 5,
+    shadowColor: '#171a1f',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
   },
   buttonDisabled: {
-    backgroundColor: '#B8A5FF',
-    shadowOpacity: 0.1,
+    opacity: 0.5,
   },
   buttonText: {
     color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '600',
+    lineHeight: 28,
   },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 24,
+    alignItems: 'center',
+    paddingBottom: 40,
   },
   footerText: {
-    color: '#6C6C6C',
-    fontSize: 15,
+    color: '#6B7280',
+    fontSize: 16,
   },
   link: {
-    color: '#7C4DFF',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  devButton: {
-    marginTop: 16,
-    alignSelf: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: '#E5E7EB',
-  },
-  devButtonText: {
-    fontSize: 13,
-    color: '#374151',
-    fontWeight: '500',
+    color: '#9D85FF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

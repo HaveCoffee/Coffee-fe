@@ -1,5 +1,34 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
+import { View } from 'react-native';
+import { useNotifications } from '../../context/NotificationContext';
+
+function ConversationsIcon({ color, focused }: { color: string; focused: boolean }) {
+  let hasUnread = false;
+  try {
+    const { totalUnreadCount } = useNotifications();
+    hasUnread = totalUnreadCount > 0;
+  } catch (error) {
+    // Context not available
+  }
+  
+  return (
+    <View style={{ position: 'relative' }}>
+      <Ionicons name={focused ? 'chatbox' : 'chatbox-outline'} size={24} color={color} />
+      {hasUnread && (
+        <View style={{
+          position: 'absolute',
+          right: -4,
+          top: -2,
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: '#FF3B30'
+        }} />
+      )}
+    </View>
+  );
+}
 
 export default function TabLayout() {
   return (
@@ -25,7 +54,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: '',
+          title: 'Home',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
           ),
@@ -54,7 +83,7 @@ export default function TabLayout() {
         options={{
           title: 'Conversations',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'chatbox' : 'chatbox-outline'} size={24} color={color} />
+            <ConversationsIcon color={color} focused={focused} />
           ),
         }}
       />

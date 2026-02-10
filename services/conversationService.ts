@@ -1,6 +1,10 @@
 // services/conversationService.ts
 // Service for user-to-user conversations (not Ella chatbot)
 
+import * as SecureStore from 'expo-secure-store';
+import { AUTH_TOKEN_KEY } from '../constants/auth';
+import { websocketService } from './websocketService';
+
 export interface Conversation {
   id: string;
   userId: string;
@@ -22,13 +26,22 @@ export interface ConversationMessage {
   read: boolean;
 }
 
+export interface Message {
+  id: string;
+  text: string;
+  senderId: string;
+  recipientId: string;
+  timestamp: string;
+  status: 'sending' | 'sent' | 'delivered' | 'read' | 'error';
+}
+
 export interface SendMessageRequest {
   conversationId: string;
   message: string;
   recipientId?: string;
 }
 
-const USE_CONVERSATION_MOCK = __DEV__;
+const USE_CONVERSATION_MOCK = false; // Use real data from active matches
 
 const mockConversations: Conversation[] = [
   {
@@ -119,9 +132,112 @@ const mockMessagesByConversationId: Record<string, ConversationMessage[]> = {
 
 export const conversationService = {
   /**
-   * Get list of conversations
-   * GET /conversations or GET /chats
+   * Get user profile
+   * GET /me
    */
+  async getUserProfile() {
+    try {
+      const token = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+      if (!token) throw new Error('No auth token found');
+
+      const response = await fetch('https://havecoffee.in/api/v1/me', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('❌ Get user profile error:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get messages with specific user
+   * GET /chat/messages/{userId}
+   */
+  async getChatMessages(userId: string): Promise<Message[]> {
+    try {
+      console.log(`🔍 [API] Fetching messages for user: ${userId}`);
+      const token = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+      if (!token) throw new Error('No auth token found');
+
+      const url = `https://havecoffee.in/api/v1/chat/messages/${userId}`;
+      console.log(`🔍 [API] Calling: ${url}`);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      console.log(`🔍 [API] Response status: ${response.status}`);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log(`🔍 [API] Error response: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log(`🔍 [API] Response data:`, data);
+      
+      // Transform API response to Message format
+      // Handle both array response and object with messages array
+      let messagesArray = [];
+      
+      if (Array.isArray(data)) {
+        messagesArray = data;
+      } else if (data.messages && Array.isArray(data.messages)) {
+        messagesArray = data.messages;
+      } else if (data.data && Array.isArray(data.data)) {
+        messagesArray = data.data;
+      }
+      
+      const messages = messagesArray.map(msg => ({
+        id: msg.id || msg.messageId || msg.message_id || Date.now().toString(),
+        text: msg.content || msg.text || msg.message || '',
+        senderId: msg.senderId || msg.sender_id || '',
+        recipientId: msg.receiverId || msg.recipient_id || userId,
+        timestamp: msg.createdAt || msg.timestamp || msg.created_at || new Date().toISOString(),
+        status: 'sent' as const,
+      }));
+      
+      console.log(`🔍 [API] Transformed ${messages.length} messages`);
+      return messages;
+    } catch (error) {
+      console.error('❌ Get messages error:', error);
+      return [];
+    }
+  },
+
+  /**
+   * Get conversation with messages
+   */
+  async getConversationMessages(userId: string): Promise<{ messages: Message[] }> {
+    const messages = await this.getChatMessages(userId);
+    return { messages };
+  },
+
+  /**
+   * Send message via WebSocket only
+   */
+  async sendMessage(recipientId: string, text: string): Promise<void> {
+    const wsSuccess = websocketService.sendMessage(recipientId, text);
+    if (!wsSuccess) {
+      throw new Error('WebSocket not connected. Please check your connection.');
+    }
+  },
+
   async getConversations(): Promise<Conversation[]> {
     if (USE_CONVERSATION_MOCK) {
       return mockConversations;
@@ -130,63 +246,7 @@ export const conversationService = {
   },
 
   /**
-   * Get messages for a specific conversation
-   * GET /conversations/{id}/messages or GET /chat/{id}/messages
-   */
-  async getConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
-    if (USE_CONVERSATION_MOCK) {
-      return mockMessagesByConversationId[conversationId] || [];
-    }
-    return [];
-  },
-
-  /**
-   * Send a message in a conversation
-   * POST /conversations/{id}/messages or POST /chat/{id}/message
-   */
-  async sendMessage(conversationId: string, message: string, recipientId?: string): Promise<ConversationMessage> {
-    if (USE_CONVERSATION_MOCK) {
-      const newMessage: ConversationMessage = {
-        id: `local-${Date.now()}`,
-        conversationId,
-        senderId: 'mock-user-123',
-        senderName: 'You',
-        text: message,
-        timestamp: new Date().toISOString(),
-        read: true,
-      };
-
-      if (!mockMessagesByConversationId[conversationId]) {
-        mockMessagesByConversationId[conversationId] = [];
-      }
-      mockMessagesByConversationId[conversationId].push(newMessage);
-
-      const index = mockConversations.findIndex(c => c.id === conversationId);
-      if (index !== -1) {
-        const updated = { ...mockConversations[index] };
-        updated.lastMessage = message;
-        updated.lastMessageTime = newMessage.timestamp;
-        updated.unreadCount = 0;
-        mockConversations[index] = updated;
-      }
-
-      return newMessage;
-    }
-
-    return {
-      id: `local-${Date.now()}`,
-      conversationId,
-      senderId: '',
-      senderName: '',
-      text: message,
-      timestamp: new Date().toISOString(),
-      read: false,
-    };
-  },
-
-  /**
    * Mark messages as read
-   * PUT /conversations/{id}/read or POST /conversations/{id}/mark-read
    */
   async markAsRead(conversationId: string, messageIds?: string[]): Promise<void> {
     if (USE_CONVERSATION_MOCK) {
@@ -206,55 +266,5 @@ export const conversationService = {
       }
     }
     return;
-  },
-
-  /**
-   * Create a new conversation or start a chat with a user
-   * POST /conversations or POST /chat/start
-   */
-  async createConversation(recipientId: string, initialMessage?: string, name?: string, userInfo?: UserInfo | string): Promise<Conversation> {
-    if (USE_CONVERSATION_MOCK) {
-      // Handle case where avatar is passed as a separate parameter for backward compatibility
-      const avatarToUse = typeof userInfo === 'object' ? (userInfo.avatar || '') : (typeof userInfo === 'string' ? userInfo : '');
-      const additionalInfo = typeof userInfo === 'object' ? userInfo : {};
-
-      const newConversation: Conversation = {
-        id: `conv-${Date.now()}`,
-        userId: recipientId,
-        userName: name || `User ${recipientId.slice(0, 6)}`,
-        userAvatar: avatarToUse,
-        lastMessage: initialMessage || 'New conversation started',
-        lastMessageTime: new Date().toISOString(),
-        unreadCount: 0,
-        isOnline: true,
-        ...additionalInfo
-      };
-
-      if (initialMessage) {
-        const message: ConversationMessage = {
-          id: `local-msg-${Date.now()}`,
-          conversationId: newConversation.id,
-          senderId: 'mock-user-123',
-          senderName: 'You',
-          text: initialMessage,
-          timestamp: new Date().toISOString(),
-          read: true,
-        };
-        mockMessagesByConversationId[conversation.id] = [message];
-      }
-
-      return conversation;
-    }
-
-    return {
-      id: `local-conv-${Date.now()}`,
-      userId: recipientId,
-      userName: name || 'Coffee match',
-      userAvatar: undefined,
-      lastMessage: initialMessage || '',
-      lastMessageTime: new Date().toISOString(),
-      unreadCount: 0,
-      isOnline: false,
-    };
   },
 };

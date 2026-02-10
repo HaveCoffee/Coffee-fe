@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
   RefreshControl,
@@ -14,28 +15,92 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Avatar from '../components/Avatar';
+import { ConnectionStatus } from '../components/ConnectionStatus';
+import { WebSocketTest } from '../components/WebSocketTest';
+import { useAuth } from '../context/AuthContext';
+import { useWebSocketContext } from '../context/WebSocketContext';
+import { useNotifications } from '../context/NotificationContext';
 import {
   Conversation,
   conversationService,
 } from '../services/conversationService';
+import { coffeeMlService } from '../services/coffeeMlService';
 
 const HomeScreen = () => {
   const router = useRouter();
   const tabBarHeight = useBottomTabBarHeight();
+  const { logout, hasCompletedOnboarding } = useAuth();
+  const { isConnected, on, off } = useWebSocketContext();
+  const { unreadCounts } = useNotifications();
+  
+  console.log('🔔 [HOME] Unread counts:', unreadCounts);
 
   const [activeTab, setActiveTab] = useState('All');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [showWebSocketTest, setShowWebSocketTest] = useState(false);
 
   const loadConversations = useCallback(async () => {
     try {
       setIsLoading(true);
-      const data = await conversationService.getConversations();
-      setConversations(data);
+      console.log('🔄 [CONVERSATIONS] Loading active chats...');
+      const activeChatsResponse = await coffeeMlService.getActiveChats();
+      console.log('📋 [CONVERSATIONS] Active chats response:', activeChatsResponse);
+      
+      // Transform Coffee-ML matches to Conversation format
+      const conversations: Conversation[] = activeChatsResponse.matches.map(match => {
+        const profileData = match.profile_data || {};
+        // Extract proper user name using pattern matching
+        const userName = profileData.name || 
+                         profileData.display_name || 
+                         profileData.username ||
+                         // Extract from vibe_summary if available
+                         (profileData.vibe_summary ? 
+                           (() => {
+                             const vibeText = profileData.vibe_summary;
+                             const iAmMatch = vibeText.match(/I am ([A-Z][a-z]+)/i);
+                             if (iAmMatch) return iAmMatch[1];
+                             const nameMatch = vibeText.match(/(?:my name is|i'm|i am) ([A-Z][a-z]+)/i);
+                             if (nameMatch) return nameMatch[1];
+                             const firstWordMatch = vibeText.match(/^([A-Z][a-z]+)(?:\s|,|\.|!)/);
+                             if (firstWordMatch && firstWordMatch[1].length > 2) return firstWordMatch[1];
+                             return null;
+                           })()
+                         : null) ||
+                         `User ${match.user_id.substring(0, 6)}`;
+        
+        return {
+          id: match.user_id,
+          userId: match.user_id,
+          userName,
+          userAvatar: undefined,
+          lastMessage: profileData.social_intent || 'Start a conversation',
+          lastMessageTime: match.last_active || new Date().toISOString(),
+          unreadCount: 1, // Default to 1 unread for testing
+          isOnline: false,
+        };
+      });
+      
+      // Update conversations with unread counts from notification context
+      const conversationsWithUnread = conversations.map(conv => ({
+        ...conv,
+        unreadCount: unreadCounts[conv.userId] || 0
+      }));
+      
+      // Sort conversations by most recent message time
+      const sortedConversations = conversationsWithUnread.sort((a, b) => 
+        new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()
+      );
+      
+      console.log('✅ [CONVERSATIONS] Transformed conversations:', sortedConversations.length);
+      setConversations(sortedConversations);
     } catch (error) {
       console.error('Error loading conversations:', error);
+      // Fallback to old service if Coffee-ML fails
+      const data = await conversationService.getConversations();
+      setConversations(data);
     } finally {
       setIsLoading(false);
       setRefreshing(false);
@@ -44,7 +109,77 @@ const HomeScreen = () => {
 
   useEffect(() => {
     loadConversations();
-  }, [loadConversations]);
+    
+    // Listen for new messages to update conversation list
+    const handleNewMessage = (data: any) => {
+      if (data.type === 'chat_message') {
+        const senderId = data.senderId || data.sender_id;
+        const messageText = data.content || data.text;
+        const timestamp = data.createdAt || data.timestamp || new Date().toISOString();
+        
+        setConversations(prev => {
+          // Update the conversation with new message and move to top
+          const updatedConversations = prev.map(conv => {
+            if (conv.userId === senderId) {
+              return {
+                ...conv,
+                lastMessage: messageText,
+                lastMessageTime: timestamp,
+                unreadCount: (unreadCounts[senderId] || 0)
+              };
+            }
+            return conv;
+          });
+          
+          // Sort by lastMessageTime (most recent first)
+          return updatedConversations.sort((a, b) => 
+            new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()
+          );
+        });
+      }
+    };
+    
+    // Listen for user online/offline status
+    const handleUserStatus = (data: any) => {
+      if (data.type === 'user_online' || data.type === 'user_offline') {
+        const isOnline = data.type === 'user_online';
+        setConversations(prev =>
+          prev.map(conv =>
+            conv.id === data.user_id ? { ...conv, isOnline } : conv
+          )
+        );
+      }
+    };
+    
+    // Listen for connection status
+    const handleConnectionChange = (data: any) => {
+      if (data.type === 'connected') {
+        console.log('[Home] WebSocket connected - refreshing conversations');
+        loadConversations();
+      }
+    };
+    
+    on('chat_message', handleNewMessage);
+    on('user_online', handleUserStatus);
+    on('user_offline', handleUserStatus);
+    on('connected', handleConnectionChange);
+    
+    // Fallback polling for when WebSocket is not available
+    const pollInterval = setInterval(() => {
+      if (!isConnected) {
+        console.log('🔄 [CONVERSATIONS] WebSocket not connected - polling for updates');
+        loadConversations();
+      }
+    }, 30000);
+    
+    return () => {
+      off('chat_message', handleNewMessage);
+      off('user_online', handleUserStatus);
+      off('user_offline', handleUserStatus);
+      off('connected', handleConnectionChange);
+      clearInterval(pollInterval);
+    };
+  }, [unreadCounts]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -77,7 +212,10 @@ const HomeScreen = () => {
   const renderConversationItem = ({ item }: { item: Conversation }) => (
     <TouchableOpacity
       style={styles.conversationItem}
-      onPress={() => router.push(`/(chat)/${item.id}`)}
+      onPress={() => router.push({
+        pathname: `/(chat)/${item.id}`,
+        params: { userName: item.userName }
+      })}
     >
       <View style={styles.avatarContainer}>
         <Avatar size={50} />
@@ -113,7 +251,10 @@ const HomeScreen = () => {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Messages</Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.headerTitle}>Messages</Text>
+          <ConnectionStatus showText={false} size="small" />
+        </View>
 
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.notificationIcon}>
@@ -159,6 +300,9 @@ const HomeScreen = () => {
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* WebSocket Test (only in development) */}
+      {__DEV__ && showWebSocketTest && <WebSocketTest />}
 
       {/* Conversations */}
       {isLoading ? (
@@ -220,6 +364,23 @@ const HomeScreen = () => {
               style={styles.menuItem}
               onPress={() => {
                 setMenuVisible(false);
+                setShowWebSocketTest(!showWebSocketTest);
+              }}
+            >
+              <Ionicons
+                name="wifi-outline"
+                size={22}
+                color="#333"
+              />
+              <Text style={styles.menuItemText}>
+                {showWebSocketTest ? 'Hide' : 'Show'} Socket.IO Test
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
                 router.push('/profile-setup' as any);
               }}
             >
@@ -235,9 +396,30 @@ const HomeScreen = () => {
 
             <TouchableOpacity
               style={styles.menuItem}
-              onPress={() => {
+              onPress={async () => {
                 setMenuVisible(false);
-                router.push('/(auth)' as any);
+                Alert.alert(
+                  'Logout',
+                  'Are you sure you want to logout?',
+                  [
+                    {
+                      text: 'Cancel',
+                      style: 'cancel',
+                    },
+                    {
+                      text: 'Logout',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          await logout();
+                          router.replace('/(auth)');
+                        } catch (error) {
+                          Alert.alert('Error', 'Failed to logout. Please try again.');
+                        }
+                      },
+                    },
+                  ]
+                );
               }}
             >
               <Ionicons
@@ -257,6 +439,7 @@ const HomeScreen = () => {
           </View>
         </View>
       </Modal>
+
     </SafeAreaView>
   );
 };
@@ -264,22 +447,33 @@ const HomeScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#FCF6F3',
   },
 
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    backgroundColor: '#FCF6F3',
+    shadowColor: '#171a1f',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
 
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1F2937',
   },
 
   headerRight: {
@@ -312,16 +506,17 @@ const styles = StyleSheet.create({
 
   tabsContainer: {
     flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    paddingHorizontal: 15,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#FCF6F3',
+    gap: 8,
   },
 
   tab: {
     paddingVertical: 8,
-    marginRight: 10,
     paddingHorizontal: 16,
-    borderRadius: 20,
+    borderRadius: 9999,
+    backgroundColor: '#F3F4F6',
   },
 
   activeTab: {
@@ -330,12 +525,13 @@ const styles = StyleSheet.create({
 
   tabText: {
     fontSize: 14,
-    color: 'gray',
+    lineHeight: 22,
+    fontWeight: '500',
+    color: '#565D6D',
   },
 
   activeTabText: {
-    color: 'white',
-    fontWeight: '600',
+    color: '#FFFFFF',
   },
 
   conversationList: {
@@ -368,9 +564,11 @@ const styles = StyleSheet.create({
 
   conversationItem: {
     flexDirection: 'row',
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f5f5f5',
+    padding: 16,
+    marginHorizontal: 10,
+    marginVertical: 6,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 32,
     alignItems: 'center',
   },
 

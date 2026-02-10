@@ -145,9 +145,14 @@ export const chatService = {
       mockChatHistory = [...mockChatHistory, botMessage];
 
       return botMessage;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending message:', error);
-      throw new Error('Failed to send message. Please try again.');
+      
+      if (error.message?.includes('timeout')) {
+        throw new Error('The chat server is not responding. Please check if the backend is running.');
+      }
+      
+      throw error;
     }
   },
 
